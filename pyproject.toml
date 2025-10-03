@@ -37,6 +37,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ai = [
+"openai>=1.0",
+"anthropic>=0.18",
+"tiktoken>=0.5"
+]
 extras = [
 "category-encoders>=2.6",
 "imbalanced-learn>=0.10",
@@ -56,7 +61,7 @@ dev = [
 "hypothesis>=6.82"
 ]
 all = [
-"featurecraft[extras,schema,dev]"
+"featurecraft[ai,extras,schema,dev]"
 ]
 
 [project.urls]

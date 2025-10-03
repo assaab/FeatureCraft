@@ -419,6 +419,132 @@ class FeatureCraftConfig(BaseModel):
         default=None, ge=100,
         description="(Deprecated: use sample_n) Maximum samples for analysis"
     )
+    
+    # ========== AI-Powered Feature Engineering ==========
+    ai_enabled: bool = Field(
+        default=False,
+        description="Enable AI-powered feature engineering with LLM planner"
+    )
+    ai_provider: str = Field(
+        default="openai",
+        description="LLM provider: openai, anthropic, mock"
+    )
+    ai_model: Optional[str] = Field(
+        default=None,
+        description="LLM model name (uses provider default if None)"
+    )
+    ai_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for LLM provider (or use env var)"
+    )
+    ai_max_features: int = Field(
+        default=100, ge=10, le=500,
+        description="Maximum features for AI planner to generate"
+    )
+    ai_max_tokens: int = Field(
+        default=50000, ge=1000, le=200000,
+        description="Maximum tokens per AI request"
+    )
+    ai_timeout_seconds: int = Field(
+        default=60, ge=10, le=300,
+        description="AI request timeout in seconds"
+    )
+    ai_validate_plan: bool = Field(
+        default=True,
+        description="Validate AI-generated plans for safety (leakage, schema, etc.)"
+    )
+    ai_strict_validation: bool = Field(
+        default=False,
+        description="Treat validation warnings as errors"
+    )
+    ai_enable_telemetry: bool = Field(
+        default=True,
+        description="Log AI call metadata (tokens, cost, latency)"
+    )
+    ai_telemetry_path: Optional[str] = Field(
+        default=None,
+        description="Path to AI telemetry log file (default: logs/ai_telemetry.jsonl)"
+    )
+    
+    # ========== Phase 2: RAG & Advanced AI Features ==========
+    ai_enable_rag: bool = Field(
+        default=False,
+        description="Enable RAG-augmented feature planning"
+    )
+    ai_rag_embedder: str = Field(
+        default="sentence_transformers",
+        description="RAG embedder provider (openai, sentence_transformers, mock)"
+    )
+    ai_rag_knowledge_dirs: List[str] = Field(
+        default_factory=list,
+        description="Directories containing domain knowledge for RAG"
+    )
+    ai_rag_index_path: Optional[str] = Field(
+        default=None,
+        description="Path to RAG index cache (default: .cache/rag_index)"
+    )
+    ai_rag_chunk_size: int = Field(
+        default=512, ge=128, le=2048,
+        description="RAG chunk size for documents"
+    )
+    ai_rag_top_k: int = Field(
+        default=5, ge=1, le=20,
+        description="Number of RAG results to retrieve"
+    )
+    
+    # Feature Pruning
+    ai_enable_pruning: bool = Field(
+        default=False,
+        description="Enable LLM-guided feature pruning"
+    )
+    ai_pruning_target_features: Optional[int] = Field(
+        default=None, ge=10, le=500,
+        description="Target number of features after pruning (None = use gates only)"
+    )
+    ai_pruning_mi_threshold: float = Field(
+        default=0.01, ge=0.0, le=1.0,
+        description="Mutual information threshold for pruning gate"
+    )
+    ai_pruning_stability_threshold: float = Field(
+        default=0.7, ge=0.0, le=1.0,
+        description="Stability threshold for pruning gate"
+    )
+    
+    # Ablation Studies
+    ai_enable_ablation: bool = Field(
+        default=False,
+        description="Enable automated ablation studies"
+    )
+    ai_ablation_strategies: List[str] = Field(
+        default_factory=lambda: ["on_off"],
+        description="Ablation strategies (on_off, window, encoding, interaction)"
+    )
+    ai_ablation_max_experiments: Optional[int] = Field(
+        default=None, ge=10, le=1000,
+        description="Maximum ablation experiments to run"
+    )
+    ai_ablation_early_stop_patience: Optional[int] = Field(
+        default=None, ge=1, le=50,
+        description="Early stopping patience for ablation"
+    )
+    
+    # Distributed Execution
+    ai_executor_engine: str = Field(
+        default="pandas",
+        description="Executor engine (pandas, spark, ray)"
+    )
+    ai_spark_master: Optional[str] = Field(
+        default=None,
+        description="Spark master URL (e.g., 'local[*]', 'spark://host:port')"
+    )
+    ai_ray_num_cpus: Optional[int] = Field(
+        default=None, ge=1,
+        description="Number of CPUs for Ray executor"
+    )
+    ai_executor_batch_size: int = Field(
+        default=1000, ge=100, le=100000,
+        description="Batch size for distributed execution"
+    )
 
     @field_validator("mid_cardinality_max")
     @classmethod
