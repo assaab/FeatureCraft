@@ -51,9 +51,13 @@ print(f"✓ Original shape: {X.shape} → Transformed: {X_transformed.shape}")
 # Save for production use
 afe.export("artifacts/")
 # Creates: pipeline.joblib, metadata.json, feature_names.txt
+
+# See what FeatureCraft did (optional)
+afe.print_explanation()  # Rich console output
+afe.save_explanation("artifacts/explanation.md")
 ```
 
-**That's it!** Your data is now ML-ready with proper encoding, scaling, and transformations.
+**That's it!** Your data is now ML-ready with proper encoding, scaling, and transformations. Want to know exactly what happened? Check the explanation files!
 
 ---
 
@@ -114,12 +118,15 @@ Prefer command line? FeatureCraft has you covered:
 # Step 1: Analyze your dataset
 featurecraft analyze --input data.csv --target target --out artifacts/
 
-# Step 2: Create and fit pipeline
+# Step 2: Create and fit pipeline (explanations shown during processing)
 featurecraft fit-transform --input data.csv --target target --out artifacts/ --estimator-family tree
 
 # Step 3: View results
 open artifacts/report.html  # macOS/Linux
 start artifacts/report.html  # Windows
+
+# Check explanation files for detailed transformation info
+open artifacts/explanation.md
 ```
 
 ---
@@ -134,7 +141,9 @@ from featurecraft.config import FeatureCraftConfig
 config = FeatureCraftConfig(
     low_cardinality_max=15,        # Max unique values for categorical
     outlier_share_threshold=0.1,   # Outlier detection sensitivity
-    random_state=42                # Reproducibility
+    random_state=42,               # Reproducibility
+    explain_transformations=True,  # Enable detailed explanations (default: True)
+    explain_auto_print=True        # Auto-print explanations after fitting (default: True)
 )
 
 afe = AutoFeatureEngineer(config=config)
@@ -149,6 +158,8 @@ afe = AutoFeatureEngineer(config=config)
 - **`pipeline.joblib`** - Your fitted scikit-learn pipeline (load with `joblib.load()`)
 - **`metadata.json`** - Configuration, feature counts, and settings
 - **`feature_names.txt`** - Names of all engineered features
+- **`explanation.md`** - Human-readable explanation of transformation decisions (when explanations enabled)
+- **`explanation.json`** - Machine-readable explanation data (when explanations enabled)
 
 ### After `afe.export_report("report.html")`
 
@@ -174,7 +185,7 @@ afe = AutoFeatureEngineer()
 summary = afe.analyze(df, target="target")
 print(f"Detected {summary.task} task")
 
-# 3. Transform
+# 3. Transform (explanations shown automatically)
 X = df.drop(columns=["target"])
 y = df["target"]
 X_transformed = afe.fit_transform(X, y, estimator_family="tree")
@@ -198,6 +209,8 @@ Ready to dive deeper? Check out:
 - **[API Reference](api-reference.md)** - Full documentation of all methods
 - **[Configuration](configuration.md)** - Detailed configuration options
 - **[CLI Reference](cli-reference.md)** - Complete command-line guide
+
+**Want to understand what FeatureCraft is doing?** Try the explainability demo in the examples folder!
 
 ---
 

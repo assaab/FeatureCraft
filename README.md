@@ -40,6 +40,8 @@ FeatureCraft is a comprehensive feature engineering library that automates the p
 
 🔍 **Dataset Analysis**: Comprehensive insights into your data including distributions, correlations, and data quality issues
 
+🔮 **Explainability & Transparency**: Detailed explanations of why and how transformations are applied, with rich console output and export capabilities
+
 📊 **Multiple Estimator Support**: Optimized preprocessing for tree-based models, linear models, SVMs, k-NN, and neural networks
 
 🛠️ **Sklearn Integration**: Seamless integration with scikit-learn pipelines and ecosystem
@@ -57,6 +59,8 @@ FeatureCraft is a comprehensive feature engineering library that automates the p
 * **Performance Optimized**: Different preprocessing strategies for different model types
 * **Production Ready**: Exports sklearn-compatible pipelines for deployment
 * **Comprehensive Analysis**: Deep insights into your dataset characteristics
+* **Explainable AI**: Understand why transformations are applied and how they affect your data
+* **Transparency**: Rich explanations help build trust and debug preprocessing decisions
 
 ## Getting Started
 
@@ -121,6 +125,11 @@ print(f"Transformed {X.shape[1]} features into {Xt.shape[1]} features")
 
 # Export pipeline for production use
 afe.export("artifacts")
+
+# Access detailed explanations (optional)
+explanation = afe.get_explanation()
+afe.print_explanation()  # Rich console output
+afe.save_explanation("artifacts/explanation.md", format="markdown")
 ```
 
 ### Estimator Families
@@ -146,7 +155,9 @@ from featurecraft.config import FeatureCraftConfig
 config = FeatureCraftConfig(
     low_cardinality_max=15,        # Max unique values for low-cardinality features
     outlier_share_threshold=0.1,   # Threshold for outlier detection
-    random_state=42               # For reproducible results
+    random_state=42,               # For reproducible results
+    explain_transformations=True,  # Enable detailed explanations (default: True)
+    explain_auto_print=True        # Auto-print explanations after fitting (default: True)
 )
 
 afe = AutoFeatureEngineer(config=config)
@@ -159,6 +170,8 @@ The `export()` method creates:
 - `pipeline.joblib`: Fitted sklearn Pipeline ready for production
 - `metadata.json`: Configuration and processing summary
 - `feature_names.txt`: List of all output feature names
+- `explanation.md`: Human-readable explanation of transformation decisions (when explanations enabled)
+- `explanation.json`: Machine-readable explanation data (when explanations enabled)
 
 The `analyze()` method generates:
 
@@ -171,6 +184,7 @@ Check out the [examples](./examples/) directory for comprehensive usage examples
 - **[01_quickstart.py](./examples/01_quickstart.py)**: Basic usage with multiple datasets
 - **[02_kaggle_benchmark.py](./examples/02_kaggle_benchmark.py)**: Kaggle dataset benchmarking
 - **[03_complex_kaggle_benchmark.py](./examples/03_complex_kaggle_benchmark.py)**: Advanced benchmarking with complex datasets
+- **[06_explainability_demo.py](./examples/06_explainability_demo.py)**: Understanding transformation decisions and explanations
 
 Run the quickstart example:
 
