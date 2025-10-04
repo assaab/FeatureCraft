@@ -383,6 +383,20 @@ class FeatureCraftConfig(BaseModel):
         default=60, ge=2, le=500,
         description="Max features to include in correlation heatmap"
     )
+    
+    # ========== Explainability ==========
+    explain_transformations: bool = Field(
+        default=True,
+        description="Enable detailed explanations of transformation decisions"
+    )
+    explain_auto_print: bool = Field(
+        default=True,
+        description="Automatically print explanations to console after fit"
+    )
+    explain_save_path: Optional[str] = Field(
+        default=None,
+        description="Path to save explanation JSON/markdown (default: artifacts_dir/explanation.md)"
+    )
 
     # ========== Schema Validation ==========
     validate_schema: bool = Field(

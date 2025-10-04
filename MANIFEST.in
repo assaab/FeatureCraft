@@ -1,0 +1,28 @@
+# Include essential documentation and configuration files
+include README.md
+include LICENSE
+include pyproject.toml
+
+# Include all templates (HTML/Jinja2 templates for reports)
+recursive-include templates *.html *.j2
+
+# Include type stubs if any
+recursive-include src *.pyi
+
+# Exclude build artifacts, tests, and development files
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude .git*
+prune tests
+prune examples
+prune docs
+prune artifacts
+prune data
+prune logs
+prune models
+prune reports
+prune test_outputs
+
+

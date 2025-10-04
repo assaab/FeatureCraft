@@ -28,6 +28,7 @@ from .encoders import (
     CountEncoder,
     make_ohe,
 )
+from .explainability import PipelineExplainer
 from .imputers import categorical_imputer, choose_numeric_imputer
 from .insights import analyze_dataset, detect_task
 from .logging import get_logger
@@ -85,6 +86,8 @@ class AutoFeatureEngineer:
         self.feature_names_: list[str] | None = None
         self.estimator_family_: str = "tree"
         self.task_: TaskType | None = None
+        self.explainer_: PipelineExplainer | None = None
+        self.explanation_: Any | None = None  # PipelineExplanation from explainability module
 
     # ---------- Configuration API ----------
     def set_params(self, **overrides) -> "AutoFeatureEngineer":
@@ -305,6 +308,17 @@ class AutoFeatureEngineer:
             n_features_out=len(self.feature_names_ or []),
             steps=[name for name, _ in self.pipeline_.steps],
         )
+        
+        # Update explanation with final feature count
+        if self.explanation_:
+            self.explanation_.n_features_out = len(self.feature_names_ or [])
+            self.explanation_.summary["n_features_out"] = len(self.feature_names_ or [])
+        
+        # Auto-print explanation if configured
+        if self.cfg.explain_transformations and self.cfg.explain_auto_print:
+            console.print()  # Blank line before explanation
+            self.print_explanation()
+        
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -341,9 +355,91 @@ class AutoFeatureEngineer:
             with open(os.path.join(out_dir, "feature_names.txt"), "w", encoding="utf-8") as f:
                 for n in self.feature_names_:
                     f.write(n + "\n")
+        
+        # Export explanation if available
+        if self.explanation_:
+            explanation_md_path = os.path.join(out_dir, "explanation.md")
+            with open(explanation_md_path, "w", encoding="utf-8") as f:
+                f.write(self.explanation_.to_markdown())
+            logger.info(f"Saved pipeline explanation to {explanation_md_path}")
+            
+            explanation_json_path = os.path.join(out_dir, "explanation.json")
+            with open(explanation_json_path, "w", encoding="utf-8") as f:
+                f.write(self.explanation_.to_json())
+            logger.debug(f"Saved pipeline explanation JSON to {explanation_json_path}")
+        
         if self.summary_:
             self.summary_.artifacts_path = out_dir
         return self.summary_ or PipelineSummary(feature_names=[], n_features_out=0, steps=[])
+    
+    def get_explanation(self) -> Any:
+        """Get the pipeline explanation object.
+        
+        Returns:
+            PipelineExplanation object with details about all transformations
+            
+        Raises:
+            RuntimeError: If pipeline has not been fitted yet
+            
+        Example:
+            >>> afe = AutoFeatureEngineer()
+            >>> afe.fit(X_train, y_train)
+            >>> explanation = afe.get_explanation()
+            >>> explanation.print_console()
+        """
+        if self.explanation_ is None:
+            raise RuntimeError(
+                "No explanation available. Fit the pipeline first with explain_transformations=True."
+            )
+        return self.explanation_
+    
+    def print_explanation(self, console: Optional[Console] = None) -> None:
+        """Print pipeline explanation to console.
+        
+        Args:
+            console: Optional Rich Console instance for custom formatting
+            
+        Raises:
+            RuntimeError: If pipeline has not been fitted yet
+            
+        Example:
+            >>> afe = AutoFeatureEngineer()
+            >>> afe.fit(X_train, y_train)
+            >>> afe.print_explanation()
+        """
+        explanation = self.get_explanation()
+        explanation.print_console(console=console)
+    
+    def save_explanation(self, path: str, format: str = "markdown") -> None:
+        """Save pipeline explanation to file.
+        
+        Args:
+            path: Output file path
+            format: Output format - 'markdown', 'md', 'json'
+            
+        Raises:
+            RuntimeError: If pipeline has not been fitted yet
+            ValueError: If format is not supported
+            
+        Example:
+            >>> afe = AutoFeatureEngineer()
+            >>> afe.fit(X_train, y_train)
+            >>> afe.save_explanation("pipeline_explanation.md")
+            >>> afe.save_explanation("pipeline_explanation.json", format="json")
+        """
+        explanation = self.get_explanation()
+        
+        format_lower = format.lower()
+        if format_lower in ("markdown", "md"):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(explanation.to_markdown())
+            logger.info(f"Saved explanation (markdown) to {path}")
+        elif format_lower == "json":
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(explanation.to_json())
+            logger.info(f"Saved explanation (JSON) to {path}")
+        else:
+            raise ValueError(f"Unsupported format: {format}. Use 'markdown', 'md', or 'json'.")
 
     # ---------- Internals ----------
     def _build_pipeline(self, X: pd.DataFrame, y: pd.Series, estimator_family: str) -> Pipeline:
@@ -351,6 +447,9 @@ class AutoFeatureEngineer:
         cfg = self.cfg
         task = detect_task(y)
         self.task_ = task
+        
+        # Initialize explainer
+        self.explainer_ = PipelineExplainer(enabled=cfg.explain_transformations)
         
         # Optional: Setup caching with joblib.Memory
         memory = None
@@ -434,6 +533,20 @@ class AutoFeatureEngineer:
             c for c in cat_cols if cfg.low_cardinality_max < card[c] <= cfg.mid_cardinality_max
         ]
         high_cat = [c for c in cat_cols if card[c] > cfg.mid_cardinality_max]
+        
+        # Explain column classification
+        self.explainer_.explain_column_classification(
+            num_cols=num_cols,
+            cat_cols=cat_cols,
+            dt_cols=dt_cols,
+            text_cols=text_cols,
+            low_cat=low_cat,
+            mid_cat=mid_cat,
+            high_cat=high_cat,
+            card=card,
+            low_threshold=cfg.low_cardinality_max,
+            mid_threshold=cfg.mid_cardinality_max,
+        )
 
         # Numeric skew mask - with additional safety checks
         skew_map = {}
@@ -478,17 +591,95 @@ class AutoFeatureEngineer:
         # Transformers per block
         num_missing_rate = float(X[num_cols].isna().mean().mean()) if num_cols else 0.0
         num_imputer = choose_numeric_imputer(num_missing_rate, len(num_cols), X.shape[0], cfg)
+        
+        # Explain numeric imputation
+        if num_cols:
+            imputer_name = type(num_imputer).__name__
+            if num_missing_rate <= cfg.numeric_simple_impute_max:
+                reason = (
+                    f"Using median imputation because missing rate ({num_missing_rate:.1%}) is low "
+                    f"(<= {cfg.numeric_simple_impute_max:.1%}). Simple strategies work well for low missingness."
+                )
+            elif num_missing_rate <= cfg.numeric_advanced_impute_max:
+                if len(num_cols) <= 100 and X.shape[0] <= 200_000:
+                    reason = (
+                        f"Using KNN imputation because missing rate ({num_missing_rate:.1%}) is moderate "
+                        f"and dataset size is manageable ({len(num_cols)} features, {X.shape[0]} rows). "
+                        "KNN can capture local patterns for better imputation."
+                    )
+                else:
+                    reason = (
+                        f"Using iterative imputation because missing rate ({num_missing_rate:.1%}) is moderate "
+                        f"but dataset is large ({len(num_cols)} features, {X.shape[0]} rows). "
+                        "Iterative imputation scales better than KNN."
+                    )
+            else:
+                reason = (
+                    f"Falling back to median imputation despite high missing rate ({num_missing_rate:.1%}) "
+                    f"(> {cfg.numeric_advanced_impute_max:.1%}). Advanced methods may not be reliable with this much missingness."
+                )
+            
+            self.explainer_.explain_imputation(
+                strategy_name=imputer_name,
+                columns=num_cols,
+                missing_rate=num_missing_rate,
+                reason=reason,
+                config_params={
+                    "numeric_simple_impute_max": cfg.numeric_simple_impute_max,
+                    "numeric_advanced_impute_max": cfg.numeric_advanced_impute_max,
+                },
+                add_indicators=True,  # SimpleImputer with add_indicator=True
+            )
 
         steps_num: list[tuple[str, Any]] = [
             ("convert", NumericConverter(columns=num_cols)),  # Ensure numeric conversion
             ("impute", num_imputer)
         ]
         if any(skew_mask):
+            skewed_cols = [c for c, mask in zip(num_cols, skew_mask) if mask]
+            skewed_info = {c: f"{skew_map[c]:.2f}" for c in skewed_cols[:10]}
+            
+            self.explainer_.explain_transformation(
+                transform_name="Yeo-Johnson Power Transform",
+                columns=skewed_cols,
+                reason=(
+                    f"Applying Yeo-Johnson transformation to {len(skewed_cols)} skewed numeric features "
+                    f"(|skewness| >= {cfg.skew_threshold}). This normalizes distributions and can improve "
+                    "model performance for linear models and neural networks."
+                ),
+                details={
+                    "n_features": len(skewed_cols),
+                    "skewness_threshold": cfg.skew_threshold,
+                    "sample_skewness": skewed_info,
+                },
+                config_params={"skew_threshold": cfg.skew_threshold},
+                recommendation=(
+                    "Power transforms are most beneficial for linear models. "
+                    "Tree-based models are generally robust to skewness."
+                ),
+            )
+            
             steps_num.append(("yeojohnson", SkewedPowerTransformer(num_cols, skew_mask)))
         
         # Optional winsorization before scaling
         if cfg.winsorize:
             from .transformers import WinsorizerTransformer
+            
+            self.explainer_.explain_transformation(
+                transform_name="Winsorization (Outlier Clipping)",
+                columns=num_cols,
+                reason=(
+                    f"Clipping extreme values to {cfg.clip_percentiles[0]:.1%} and {cfg.clip_percentiles[1]:.1%} "
+                    "percentiles to reduce the impact of outliers. This is especially useful before scaling."
+                ),
+                details={
+                    "lower_percentile": cfg.clip_percentiles[0],
+                    "upper_percentile": cfg.clip_percentiles[1],
+                },
+                config_params={"winsorize": cfg.winsorize, "clip_percentiles": cfg.clip_percentiles},
+                recommendation="Winsorization is a robust alternative to removing outliers completely.",
+            )
+            
             steps_num.append(("winsorize", WinsorizerTransformer(
                 percentiles=cfg.clip_percentiles,
                 columns=num_cols,
@@ -496,11 +687,88 @@ class AutoFeatureEngineer:
         
         scaler = choose_scaler(estimator_family, heavy_outliers, cfg)
         if scaler is not None:
+            scaler_name = type(scaler).__name__
+            
+            # Determine reason for scaler choice
+            if heavy_outliers and cfg.scaler_robust_if_outliers:
+                reason = (
+                    f"Using RobustScaler because heavy outliers detected (>{cfg.outlier_share_threshold:.1%} "
+                    f"of values are outliers). RobustScaler uses median and IQR, making it robust to outliers."
+                )
+            else:
+                reason = (
+                    f"Using {scaler_name} for {estimator_family} estimator family. "
+                )
+                if estimator_family.lower() in {"linear", "svm"}:
+                    reason += "Linear models and SVMs benefit from standardized features with mean=0, std=1."
+                elif estimator_family.lower() in {"knn", "nn"}:
+                    reason += "Distance-based models require scaled features to prevent dominance by large-magnitude features."
+                elif estimator_family.lower() in {"tree", "gbm"}:
+                    reason += "Tree-based models don't require scaling but it was explicitly configured."
+            
+            self.explainer_.explain_scaling(
+                scaler_name=scaler_name,
+                columns=num_cols,
+                reason=reason,
+                details={
+                    "estimator_family": estimator_family,
+                    "heavy_outliers": heavy_outliers,
+                    "outlier_threshold": cfg.outlier_share_threshold,
+                },
+                config_params={
+                    f"scaler_{estimator_family.lower()}": cfg.scaler_tree if estimator_family.lower() == "tree" else cfg.scaler_linear,
+                    "scaler_robust_if_outliers": cfg.scaler_robust_if_outliers,
+                },
+            )
+            
             steps_num.append(("scale", scaler))
+        elif num_cols:
+            # Explain why no scaling
+            reason = (
+                f"No scaling applied for {estimator_family} estimator family. "
+            )
+            if estimator_family.lower() in {"tree", "gbm"}:
+                reason += "Tree-based models are scale-invariant and don't require feature scaling."
+            
+            self.explainer_.explain_scaling(
+                scaler_name="None (No Scaling)",
+                columns=num_cols,
+                reason=reason,
+                details={"estimator_family": estimator_family},
+                config_params={f"scaler_{estimator_family.lower()}": "none"},
+            )
+        
         num_pipe = Pipeline(steps=steps_num)
 
         # Categorical pipelines
         from .encoders import make_ohe
+        
+        # Explain low cardinality encoding
+        if low_cat:
+            self.explainer_.explain_encoding(
+                strategy_name="One-Hot Encoding (OHE)",
+                columns=low_cat,
+                reason=(
+                    f"Using one-hot encoding for {len(low_cat)} low-cardinality categorical features. "
+                    f"OHE creates binary columns for each category, which works well when cardinality is low "
+                    f"(<= {cfg.low_cardinality_max} unique values)."
+                ),
+                details={
+                    "n_columns": len(low_cat),
+                    "rare_grouping_threshold": cfg.rare_level_threshold,
+                    "handle_unknown": cfg.ohe_handle_unknown,
+                },
+                config_params={
+                    "low_cardinality_max": cfg.low_cardinality_max,
+                    "rare_level_threshold": cfg.rare_level_threshold,
+                    "ohe_handle_unknown": cfg.ohe_handle_unknown,
+                },
+                recommendation=(
+                    f"Rare categories (<{cfg.rare_level_threshold:.1%} frequency) will be grouped into 'Other' "
+                    "to prevent overfitting on rare values."
+                ),
+            )
+        
         cat_low_pipe = Pipeline(
             steps=[
                 ("rare", RareCategoryGrouper(min_freq=cfg.rare_level_threshold)),
@@ -524,6 +792,31 @@ class AutoFeatureEngineer:
                     random_state=cfg.random_state,
                     task=task.value,
                 )
+                
+                self.explainer_.explain_encoding(
+                    strategy_name="Leave-One-Out Target Encoding",
+                    columns=mid_cat,
+                    reason=(
+                        f"Using leave-one-out target encoding for {len(mid_cat)} medium-cardinality features. "
+                        "This replaces categories with target statistics computed excluding the current row, "
+                        "preventing leakage while capturing the predictive relationship between category and target."
+                    ),
+                    details={
+                        "n_columns": len(mid_cat),
+                        "smoothing": cfg.target_encoding_smoothing,
+                        "noise_std": cfg.target_encoding_noise,
+                    },
+                    config_params={
+                        "use_target_encoding": cfg.use_target_encoding,
+                        "use_leave_one_out_te": cfg.use_leave_one_out_te,
+                        "target_encoding_smoothing": cfg.target_encoding_smoothing,
+                        "target_encoding_noise": cfg.target_encoding_noise,
+                    },
+                    recommendation=(
+                        "Target encoding is powerful for medium-cardinality features but requires careful "
+                        "cross-validation to avoid overfitting."
+                    ),
+                )
             else:
                 # Use OutOfFoldTargetEncoder for training to prevent leakage
                 te = OutOfFoldTargetEncoder(
@@ -538,17 +831,93 @@ class AutoFeatureEngineer:
                     task=task.value,
                     raise_on_target_in_transform=cfg.raise_on_target_in_transform,
                 )
+                
+                self.explainer_.explain_encoding(
+                    strategy_name="Out-of-Fold Target Encoding",
+                    columns=mid_cat,
+                    reason=(
+                        f"Using out-of-fold target encoding for {len(mid_cat)} medium-cardinality features. "
+                        f"This uses {cfg.cv_n_splits}-fold cross-validation to encode categories with target statistics, "
+                        "preventing leakage and providing robust encodings."
+                    ),
+                    details={
+                        "n_columns": len(mid_cat),
+                        "cv_strategy": cfg.cv_strategy,
+                        "n_splits": cfg.cv_n_splits,
+                        "smoothing": cfg.te_smoothing,
+                        "noise_std": cfg.te_noise,
+                        "prior_strategy": cfg.te_prior,
+                    },
+                    config_params={
+                        "use_target_encoding": cfg.use_target_encoding,
+                        "cv_strategy": cfg.cv_strategy,
+                        "cv_n_splits": cfg.cv_n_splits,
+                        "te_smoothing": cfg.te_smoothing,
+                        "te_noise": cfg.te_noise,
+                    },
+                    recommendation=(
+                        "Out-of-fold target encoding is the gold standard for preventing leakage. "
+                        "Higher smoothing values add more regularization."
+                    ),
+                )
             cat_mid_pipe = Pipeline(steps=[("impute", categorical_imputer(cfg)), ("te", te)])
         elif cfg.use_frequency_encoding and mid_cat:
             # Alternative: Use FrequencyEncoder
             freq_enc = FrequencyEncoder(cols=None, unseen_value=0.0)  # Let ColumnTransformer handle column selection
+            
+            self.explainer_.explain_encoding(
+                strategy_name="Frequency Encoding",
+                columns=mid_cat,
+                reason=(
+                    f"Using frequency encoding for {len(mid_cat)} medium-cardinality features. "
+                    "Each category is replaced with its frequency (proportion) in the training data. "
+                    "This is simpler than target encoding and doesn't use target information."
+                ),
+                details={"n_columns": len(mid_cat), "unseen_value": 0.0},
+                config_params={"use_frequency_encoding": cfg.use_frequency_encoding},
+                recommendation="Frequency encoding is a safe alternative when you want to avoid target encoding.",
+            )
+            
             cat_mid_pipe = Pipeline(steps=[("impute", categorical_imputer(cfg)), ("freq", freq_enc)])
         elif cfg.use_count_encoding and mid_cat:
             # Alternative: Use CountEncoder
             count_enc = CountEncoder(cols=None, unseen_value=0.0, normalize=False)  # Let ColumnTransformer handle column selection
+            
+            self.explainer_.explain_encoding(
+                strategy_name="Count Encoding",
+                columns=mid_cat,
+                reason=(
+                    f"Using count encoding for {len(mid_cat)} medium-cardinality features. "
+                    "Each category is replaced with its absolute count in the training data."
+                ),
+                details={"n_columns": len(mid_cat), "unseen_value": 0.0, "normalize": False},
+                config_params={"use_count_encoding": cfg.use_count_encoding},
+                recommendation="Count encoding preserves the absolute frequency information unlike frequency encoding.",
+            )
+            
             cat_mid_pipe = Pipeline(steps=[("impute", categorical_imputer(cfg)), ("count", count_enc)])
         else:
             # Fallback to hashing if TE disabled
+            if mid_cat:
+                self.explainer_.explain_encoding(
+                    strategy_name="Feature Hashing",
+                    columns=mid_cat,
+                    reason=(
+                        f"Using feature hashing for {len(mid_cat)} medium-cardinality features "
+                        f"(target encoding is disabled). Hashing projects categories into {cfg.hashing_n_features_tabular} "
+                        "dimensions using a hash function, providing a memory-efficient encoding."
+                    ),
+                    details={
+                        "n_columns": len(mid_cat),
+                        "n_hash_features": cfg.hashing_n_features_tabular,
+                    },
+                    config_params={
+                        "hashing_n_features_tabular": cfg.hashing_n_features_tabular,
+                        "use_target_encoding": cfg.use_target_encoding,
+                    },
+                    recommendation="Consider enabling target encoding for potentially better performance.",
+                )
+            
             cat_mid_pipe = Pipeline(
                 steps=[
                     ("impute", categorical_imputer(cfg)),
@@ -557,6 +926,30 @@ class AutoFeatureEngineer:
                 ]
             )
         # High-card hashing
+        if high_cat:
+            self.explainer_.explain_encoding(
+                strategy_name="Feature Hashing (High Cardinality)",
+                columns=high_cat,
+                reason=(
+                    f"Using feature hashing for {len(high_cat)} high-cardinality features "
+                    f"(>{cfg.mid_cardinality_max} unique values). Hashing prevents dimension explosion "
+                    f"by projecting categories into {cfg.hashing_n_features_tabular} dimensions."
+                ),
+                details={
+                    "n_columns": len(high_cat),
+                    "n_hash_features": cfg.hashing_n_features_tabular,
+                    "rare_grouping_threshold": cfg.rare_level_threshold,
+                },
+                config_params={
+                    "hashing_n_features_tabular": cfg.hashing_n_features_tabular,
+                    "mid_cardinality_max": cfg.mid_cardinality_max,
+                },
+                recommendation=(
+                    "For very high cardinality features (like IDs), consider whether they should be "
+                    "included at all, as they may not generalize well."
+                ),
+            )
+        
         cat_high_pipe = Pipeline(
             steps=[
                 ("impute", categorical_imputer(cfg)),
@@ -572,43 +965,102 @@ class AutoFeatureEngineer:
 
         # Text - Custom selector for text columns (using module-level class)
         text_transformers = []
-        for c in text_cols:
+        if text_cols:
+            text_method = "Hashing Vectorizer" if cfg.text_use_hashing else "TF-IDF"
             svd_k = (
                 None
                 if estimator_family.lower() in {"linear", "svm"}
                 else cfg.svd_components_for_trees
             )
-            text_transformers.append(
-                (
-                    f"text_{c}", 
-                    build_text_pipeline(
-                        c, 
-                        cfg.tfidf_max_features, 
-                        svd_k,
-                        use_hashing=cfg.text_use_hashing,
-                        hashing_features=cfg.text_hashing_features,
-                        char_ngrams=cfg.text_char_ngrams,
-                    ), 
-                    c
-                )
+            
+            details = {
+                "n_columns": len(text_cols),
+                "method": text_method,
+            }
+            
+            if cfg.text_use_hashing:
+                details["n_features"] = cfg.text_hashing_features
+            else:
+                details["max_features"] = cfg.tfidf_max_features
+            
+            if svd_k:
+                details["svd_components"] = svd_k
+            
+            reason = (
+                f"Processing {len(text_cols)} text columns using {text_method}. "
             )
+            if cfg.text_use_hashing:
+                reason += f"Hashing vectorizer provides memory-efficient text encoding with {cfg.text_hashing_features} features."
+            else:
+                reason += f"TF-IDF captures term importance across documents with up to {cfg.tfidf_max_features} features."
+            
+            if svd_k:
+                reason += f" Applying SVD dimensionality reduction to {svd_k} components for tree models."
+            
+            self.explainer_.explain_text_processing(
+                columns=text_cols,
+                method=text_method,
+                details=details,
+                config_params={
+                    "text_use_hashing": cfg.text_use_hashing,
+                    "text_hashing_features": cfg.text_hashing_features,
+                    "tfidf_max_features": cfg.tfidf_max_features,
+                    "svd_components_for_trees": svd_k,
+                    "text_char_ngrams": cfg.text_char_ngrams,
+                },
+            )
+            
+            for c in text_cols:
+                text_transformers.append(
+                    (
+                        f"text_{c}", 
+                        build_text_pipeline(
+                            c, 
+                            cfg.tfidf_max_features, 
+                            svd_k,
+                            use_hashing=cfg.text_use_hashing,
+                            hashing_features=cfg.text_hashing_features,
+                            char_ngrams=cfg.text_char_ngrams,
+                        ), 
+                        c
+                    )
+                )
 
         # Datetime expansion with optional Fourier & holiday features
         if dt_cols:
             from .time_series import FourierFeatures, HolidayFeatures
             dt_steps = [("base", DateTimeFeatures(dt_cols))]
+            
+            features_generated = [
+                "year", "quarter", "month", "weekday", "hour", "is_weekend",
+                "month_sin/cos", "weekday_sin/cos", "hour_sin/cos"
+            ]
+            
             # Add Fourier features if enabled
             if cfg.use_fourier and cfg.time_column:
+                features_generated.append(f"fourier (orders: {cfg.fourier_orders})")
                 for col in dt_cols:
                     dt_steps.append(
                         (f"fourier_{col}", FourierFeatures(column=col, orders=cfg.fourier_orders))
                     )
             # Add holiday features if enabled
             if cfg.holiday_country and cfg.time_column:
+                features_generated.append(f"holidays ({cfg.holiday_country})")
                 for col in dt_cols:
                     dt_steps.append(
                         (f"holiday_{col}", HolidayFeatures(column=col, country_code=cfg.holiday_country))
                     )
+            
+            self.explainer_.explain_datetime_processing(
+                columns=dt_cols,
+                features_generated=features_generated,
+                config_params={
+                    "use_fourier": cfg.use_fourier,
+                    "fourier_orders": cfg.fourier_orders if cfg.use_fourier else None,
+                    "holiday_country": cfg.holiday_country,
+                },
+            )
+            
             dt_pipe = Pipeline(steps=dt_steps) if len(dt_steps) > 0 else DateTimeFeatures(dt_cols)
         else:
             dt_pipe = "drop"
@@ -652,6 +1104,19 @@ class AutoFeatureEngineer:
             )
             pipe_steps.append(("schema_validator", schema_validator))
             logger.debug("Schema validation enabled as first pipeline step")
+            
+            self.explainer_.explain_validation(
+                validation_type="Schema Validation",
+                reason=(
+                    "Validating input data schema before transformation to detect data drift and type errors. "
+                    f"Schema coercion is {'enabled' if cfg.schema_coerce else 'disabled'}."
+                ),
+                config_params={
+                    "validate_schema": cfg.validate_schema,
+                    "schema_coerce": cfg.schema_coerce,
+                    "schema_path": cfg.schema_path,
+                },
+            )
         
         # STEP 2: Main preprocessing
         pipe_steps.append(("preprocess", preprocessor))
@@ -659,6 +1124,32 @@ class AutoFeatureEngineer:
         # STEP 3: Optional dimensionality reducer
         if cfg.reducer_kind:
             from .transformers import DimensionalityReducer
+            
+            n_comp = cfg.reducer_components or "auto"
+            reason = (
+                f"Applying {cfg.reducer_kind.upper()} dimensionality reduction to reduce feature space. "
+            )
+            if cfg.reducer_kind == "pca":
+                if cfg.reducer_variance:
+                    reason += f"Keeping components that explain {cfg.reducer_variance:.1%} of variance."
+                else:
+                    reason += f"Reducing to {n_comp} components."
+            elif cfg.reducer_kind == "svd":
+                reason += f"Using truncated SVD to extract {n_comp} latent features."
+            elif cfg.reducer_kind == "umap":
+                reason += f"Using UMAP for non-linear dimensionality reduction to {n_comp} components."
+            
+            self.explainer_.explain_dimensionality_reduction(
+                method=cfg.reducer_kind,
+                n_components=cfg.reducer_components or 0,
+                reason=reason,
+                config_params={
+                    "reducer_kind": cfg.reducer_kind,
+                    "reducer_components": cfg.reducer_components,
+                    "reducer_variance": cfg.reducer_variance,
+                },
+            )
+            
             pipe_steps.append((
                 "reducer",
                 DimensionalityReducer(
@@ -674,6 +1165,18 @@ class AutoFeatureEngineer:
         
         # Build pipeline with optional caching
         pipe = Pipeline(steps=pipe_steps, memory=memory)
+        
+        # Finalize explanation with summary
+        self.explainer_.set_summary(
+            estimator_family=estimator_family,
+            task_type=task.value,
+            n_features_in=X.shape[1],
+            n_features_out=0,  # Will be updated after fit
+        )
+        
+        # Store explanation
+        self.explanation_ = self.explainer_.get_explanation()
+        
         return pipe
 
     def _get_feature_names(self, X: pd.DataFrame) -> list[str]:

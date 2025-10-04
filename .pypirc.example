@@ -1,0 +1,26 @@
+# PyPI Configuration File Example
+# 
+# Copy this file to ~/.pypirc (Linux/Mac) or %USERPROFILE%\.pypirc (Windows)
+# and fill in your actual credentials
+#
+# For security, NEVER commit the actual .pypirc file to version control!
+
+[distutils]
+index-servers =
+    pypi
+    testpypi
+
+[pypi]
+repository = https://upload.pypi.org/legacy/
+username = __token__
+password = pypi-YourActualPyPITokenHere
+
+[testpypi]
+repository = https://test.pypi.org/legacy/
+username = __token__
+password = pypi-YourActualTestPyPITokenHere
+
+# Alternative: Use environment variables or keyring for better security
+# See: https://twine.readthedocs.io/en/latest/#environment-variables
+
+
