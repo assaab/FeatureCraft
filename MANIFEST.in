@@ -3,11 +3,8 @@ include README.md
 include LICENSE
 include pyproject.toml
 
-# Include all templates (HTML/Jinja2 templates for reports)
-recursive-include templates *.html *.j2
-
-# Include type stubs if any
-recursive-include src *.pyi
+# Include all source files and templates
+recursive-include src *.py *.pyi *.j2 *.html
 
 # Exclude build artifacts, tests, and development files
 global-exclude __pycache__

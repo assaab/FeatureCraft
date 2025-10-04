@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "featurecraft"
-version = "0.1.0"
+version = "0.1.1"
 description = "Automatic feature engineering, insights, and sklearn pipelines for tabular ML with optional time-series support."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,23 +34,20 @@ dependencies = [
 "typer>=0.9",
 "pydantic>=2.5",
 "rich>=13.3",
-"joblib>=1.3"
+"joblib>=1.3",
+# AI features
+"openai>=1.0",
+"anthropic>=0.18",
+"tiktoken>=0.5",
+# Enhanced functionality
+"category-encoders>=2.6",
+"imbalanced-learn>=0.10",
+"shap>=0.44",
+# Schema validation
+"pandera>=0.17"
 ]
 
 [project.optional-dependencies]
-ai = [
-"openai>=1.0",
-"anthropic>=0.18",
-"tiktoken>=0.5"
-]
-extras = [
-"category-encoders>=2.6",
-"imbalanced-learn>=0.10",
-"shap>=0.44"
-]
-schema = [
-"pandera>=0.17"
-]
 dev = [
 "pytest>=7.4",
 "pytest-cov>=4.1",
@@ -64,9 +61,6 @@ dev = [
 "bandit>=1.7",  # Security linting
 "pip-audit>=2.6",  # Dependency vulnerability scanning
 "pre-commit>=3.5",  # Git hooks
-]
-all = [
-"featurecraft[ai,extras,schema,dev]"
 ]
 
 [project.urls]
@@ -83,14 +77,10 @@ packages = ["src/featurecraft"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/featurecraft",
-    "templates",
+    "src/",
     "README.md",
     "LICENSE",
 ]
-
-[tool.hatch.build.targets.wheel.force-include]
-"templates" = "featurecraft/templates"
 
 [tool.black]
 line-length = 100

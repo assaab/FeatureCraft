@@ -42,12 +42,19 @@ def main():
     print(f"   Iris dataset: {iris_df.shape[0]} samples, {iris_df.shape[1]} features")
     print(f"   Wine dataset: {wine_df.shape[0]} samples, {wine_df.shape[1]} features")
 
-    # Initialize FeatureCraft
+    # Initialize FeatureCraft with explanations enabled
     print("\n2. Initializing FeatureCraft...")
     try:
         from featurecraft.pipeline import AutoFeatureEngineer
-        fe = AutoFeatureEngineer()
-        print("   [OK] FeatureCraft initialized successfully")
+        from featurecraft.config import FeatureCraftConfig
+        
+        # Enable feature explanations with auto-print
+        config = FeatureCraftConfig(
+            explain_transformations=True,
+            explain_auto_print=True  # Automatically print explanations after fit()
+        )
+        fe = AutoFeatureEngineer(config=config)
+        print("   [OK] FeatureCraft initialized with automatic explanations enabled")
     except ImportError as e:
         print(f"   [ERROR] Could not import FeatureCraft: {e}")
         print("   Please install with: pip install featurecraft")
@@ -73,7 +80,7 @@ def main():
     iris_pred = clf.predict(iris_X_test_fe)
     iris_acc = accuracy_score(iris_y_test, iris_pred)
 
-    print(f"   Test accuracy: {iris_acc:.3f}")
+    print(f"\n   Test accuracy: {iris_acc:.3f}")
 
     # Process Wine dataset
     print("\n4. Processing Wine dataset...")
@@ -88,14 +95,14 @@ def main():
 
     print(f"   Original features: {wine_X_train.shape[1]}")
     print(f"   Engineered features: {wine_X_train_fe.shape[1]}")
-                
-                # Train and evaluate
+
+    # Train and evaluate
     clf = RandomForestClassifier(random_state=42, n_estimators=10)
     clf.fit(wine_X_train_fe, wine_y_train)
     wine_pred = clf.predict(wine_X_test_fe)
     wine_acc = accuracy_score(wine_y_test, wine_pred)
 
-    print(f"   Test accuracy: {wine_acc:.3f}")
+    print(f"\n   Test accuracy: {wine_acc:.3f}")
 
     print("\n" + "=" * 50)
     print("FeatureCraft Demo Complete!")

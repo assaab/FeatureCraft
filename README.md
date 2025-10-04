@@ -1,7 +1,8 @@
 # FeatureCraft
 
 <div align="center">
-  <p><strong>Automatic feature engineering, insights, and sklearn pipelines for tabular ML with optional time-series support.</strong></p>
+  <p><strong>Automatic feature engineering with beautiful explanations - zero configuration, maximum transparency!</strong></p>
+  <p>Intelligent preprocessing pipelines + automatic explanations for every decision + sklearn integration</p>
 
   [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -9,10 +10,37 @@
 
 </div>
 
+## Quick Start
+
+```bash
+pip install featurecraft
+```
+
+```python
+from featurecraft.pipeline import AutoFeatureEngineer
+import pandas as pd
+
+# Load data
+df = pd.read_csv("data.csv")
+X, y = df.drop("target", axis=1), df["target"]
+
+# Fit and transform with automatic explanations!
+afe = AutoFeatureEngineer()
+X_transformed = afe.fit_transform(X, y, estimator_family="tree")
+
+# Beautiful formatted explanations automatically print showing:
+# - Why each transformation was chosen
+# - What columns were affected
+# - Configuration parameters used
+# - Performance tips and recommendations
+```
+
+That's it! Zero configuration, maximum transparency.
+
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [About The Project](#about-the-project)
-  - [Built With](#built-with)
 - [Getting Started](#getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
@@ -27,8 +55,6 @@
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
-- [Contact](#contact)
-- [Acknowledgments](#acknowledgments)
 
 ## About The Project
 
@@ -38,9 +64,9 @@ FeatureCraft is a comprehensive feature engineering library that automates the p
 
 ✨ **Automatic Feature Engineering**: Intelligent preprocessing pipeline that handles missing values, outliers, categorical encoding, and feature scaling
 
-🔍 **Dataset Analysis**: Comprehensive insights into your data including distributions, correlations, and data quality issues
+🔮 **Automatic Explainability**: Beautiful, automatic explanations of every transformation decision printed to console - understand WHY each preprocessing choice was made without any extra code!
 
-🔮 **Explainability & Transparency**: Detailed explanations of why and how transformations are applied, with rich console output and export capabilities
+🔍 **Dataset Analysis**: Comprehensive insights into your data including distributions, correlations, and data quality issues
 
 📊 **Multiple Estimator Support**: Optimized preprocessing for tree-based models, linear models, SVMs, k-NN, and neural networks
 
@@ -55,6 +81,7 @@ FeatureCraft is a comprehensive feature engineering library that automates the p
 ### Why FeatureCraft?
 
 * **Automated Workflow**: No need to manually handle different data types and preprocessing steps
+* **Automatic Explanations**: See beautiful formatted explanations of every decision - enabled by default with zero extra code!
 * **Best Practices**: Implements proven feature engineering techniques
 * **Performance Optimized**: Different preprocessing strategies for different model types
 * **Production Ready**: Exports sklearn-compatible pipelines for deployment
@@ -74,15 +101,10 @@ FeatureCraft is a comprehensive feature engineering library that automates the p
 ### Installation
 
 ```bash
-# Basic installation
 pip install featurecraft
-
-# With optional extras for enhanced functionality
-pip install "featurecraft[extras]"
-
-# Full installation with all dependencies
-pip install "featurecraft[all]"
 ```
+
+All features including AI-powered planning, enhanced encoders, SHAP explainability, and schema validation are included by default.
 
 ## Usage
 
@@ -101,35 +123,57 @@ open artifacts/report.html
 
 ### Python API
 
+#### Basic Usage with Automatic Explanations
+
 ```python
 import pandas as pd
 from featurecraft.pipeline import AutoFeatureEngineer
+from featurecraft.config import FeatureCraftConfig
 
 # Load your data
 df = pd.read_csv("your_data.csv")
-
-# Initialize the feature engineer
-afe = AutoFeatureEngineer()
-
-# Analyze dataset (optional but recommended)
-summary = afe.analyze(df, target="target_column")
-print(f"Detected task: {summary.task}")
-print(f"Found {len(summary.issues)} data quality issues")
-
-# Prepare features and target
 X, y = df.drop(columns=["target_column"]), df["target_column"]
 
-# Fit and transform with estimator-specific preprocessing
+# Initialize with automatic explanations (enabled by default)
+config = FeatureCraftConfig(
+    explain_transformations=True,  # Enable explanations (default)
+    explain_auto_print=True        # Auto-print after fit (default)
+)
+afe = AutoFeatureEngineer(config=config)
+
+# Fit and transform - explanations print automatically!
 Xt = afe.fit_transform(X, y, estimator_family="tree")
+# Beautiful formatted explanations appear here showing:
+#   - Column classifications
+#   - Imputation strategies
+#   - Encoding decisions
+#   - Scaling choices
+#   - Feature transformations
+#   - And WHY each decision was made!
+
 print(f"Transformed {X.shape[1]} features into {Xt.shape[1]} features")
 
 # Export pipeline for production use
 afe.export("artifacts")
+```
 
-# Access detailed explanations (optional)
-explanation = afe.get_explanation()
+#### Advanced: Analyze + Manual Explanation Control
+
+```python
+# Analyze dataset first (optional but recommended)
+summary = afe.analyze(df, target="target_column")
+print(f"Detected task: {summary.task}")
+print(f"Found {len(summary.issues)} data quality issues")
+
+# Fit with manual explanation control
+config = FeatureCraftConfig(explain_auto_print=False)  # Disable auto-print
+afe = AutoFeatureEngineer(config=config)
+afe.fit(X, y, estimator_family="linear")
+
+# Print or save explanations manually
 afe.print_explanation()  # Rich console output
 afe.save_explanation("artifacts/explanation.md", format="markdown")
+afe.save_explanation("artifacts/explanation.json", format="json")
 ```
 
 ### Estimator Families
@@ -156,11 +200,17 @@ config = FeatureCraftConfig(
     low_cardinality_max=15,        # Max unique values for low-cardinality features
     outlier_share_threshold=0.1,   # Threshold for outlier detection
     random_state=42,               # For reproducible results
+    
+    # Explainability (enabled by default!)
     explain_transformations=True,  # Enable detailed explanations (default: True)
-    explain_auto_print=True        # Auto-print explanations after fitting (default: True)
+    explain_auto_print=True,       # Auto-print after fit() (default: True)
+    explain_save_path=None,        # Optional: auto-save to file path
 )
 
 afe = AutoFeatureEngineer(config=config)
+
+# Note: You can also use AutoFeatureEngineer() without config 
+# and get automatic explanations by default!
 ```
 
 ### Output Artifacts
@@ -181,17 +231,18 @@ The `analyze()` method generates:
 
 Check out the [examples](./examples/) directory for comprehensive usage examples:
 
-- **[01_quickstart.py](./examples/01_quickstart.py)**: Basic usage with multiple datasets
+- **[01_quickstart.py](./examples/01_quickstart.py)**: Basic usage with automatic explanations on Iris and Wine datasets
 - **[02_kaggle_benchmark.py](./examples/02_kaggle_benchmark.py)**: Kaggle dataset benchmarking
 - **[03_complex_kaggle_benchmark.py](./examples/03_complex_kaggle_benchmark.py)**: Advanced benchmarking with complex datasets
-- **[06_explainability_demo.py](./examples/06_explainability_demo.py)**: Understanding transformation decisions and explanations
+- **[06_explainability_demo.py](./examples/06_explainability_demo.py)**: Deep dive into explanation features and export formats
 
-Run the quickstart example:
+Run the quickstart example to see automatic explanations in action:
 
 ```bash
-cd examples
-python 01_quickstart.py --cases iris,wine,breast_cancer --artifacts ../artifacts
+python examples/01_quickstart.py
 ```
+
+This will demonstrate automatic feature engineering with beautiful formatted explanations for the Iris and Wine datasets!
 
 ## Documentation
 
