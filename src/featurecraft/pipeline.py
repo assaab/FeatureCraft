@@ -45,6 +45,7 @@ from .text import build_text_pipeline
 from .transformers import DateTimeFeatures, EnsureNumericOutput, NumericConverter, SkewedPowerTransformer
 from .types import DatasetInsights, PipelineSummary, TaskType
 from .validators import validate_input_frame
+from .exceptions import PipelineNotFittedError, SecurityError, InputValidationError, ExportError
 
 logger = get_logger(__name__)
 console = Console()
@@ -212,19 +213,55 @@ class AutoFeatureEngineer:
         """Load reference dataset from path (CSV or parquet).
         
         Args:
-            path: Path to reference dataset
+            path: Path to reference dataset (must be under workspace or allowed directories)
             
         Returns:
             Reference DataFrame
+            
+        Raises:
+            SecurityError: If path attempts directory traversal
+            FileNotFoundError: If file doesn't exist
         """
-        import os
-        if not os.path.exists(path):
+        from pathlib import Path
+        
+        # Resolve to absolute path and check for traversal
+        ref_path = Path(path).resolve()
+        workspace = Path.cwd().resolve()
+        
+        # Allow paths under workspace, artifacts dir, or tmp
+        allowed_dirs = [
+            workspace,
+            Path("/tmp"),
+            Path(self.cfg.artifacts_dir).resolve()
+        ]
+        
+        # Cross-platform path validation using relative_to (works on Windows with different drives)
+        path_allowed = False
+        for allowed_dir in allowed_dirs:
+            try:
+                # Try to get relative path - raises ValueError if not under allowed_dir
+                _ = ref_path.relative_to(allowed_dir)
+                path_allowed = True
+                break
+            except ValueError:
+                # Path not under this allowed directory, try next
+                continue
+        
+        if not path_allowed:
+            raise SecurityError(
+                f"Path outside allowed directories. Use paths under workspace, artifacts, or /tmp.",
+                provided_path=path,
+                resolved_path=str(ref_path),
+                allowed_dirs=[str(d) for d in allowed_dirs]
+            )
+        
+        if not ref_path.exists():
             raise FileNotFoundError(f"Reference data not found: {path}")
         
-        if path.endswith('.parquet'):
-            return pd.read_parquet(path)
+        if ref_path.suffix == ".parquet":
+            return pd.read_parquet(ref_path)
         else:
-            return pd.read_csv(path)
+            return pd.read_csv(ref_path)
     
     def _compute_drift_report(self, reference_df: pd.DataFrame, current_df: pd.DataFrame) -> dict:
         """Compute drift report between reference and current datasets.
@@ -299,6 +336,9 @@ class AutoFeatureEngineer:
             self.cfg = config
             logger.debug("Using runtime config override for fit")
 
+        # Store training columns for validation
+        self._training_columns = list(X.columns)
+        
         self.estimator_family_ = estimator_family
         self.pipeline_ = self._build_pipeline(X, y, estimator_family)
         self.pipeline_.fit(X, y)
@@ -322,13 +362,56 @@ class AutoFeatureEngineer:
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Transform data using fitted pipeline."""
+        """Transform data using fitted pipeline.
+        
+        Args:
+            X: Input DataFrame to transform
+            
+        Returns:
+            Transformed DataFrame with feature names
+            
+        Raises:
+            PipelineNotFittedError: If pipeline not fitted
+            InputValidationError: If input schema doesn't match training data
+        """
         if self.pipeline_ is None:
-            raise RuntimeError("Pipeline is not fitted.")
+            raise PipelineNotFittedError(
+                "Cannot transform: pipeline not fitted. Call fit() first.",
+                operation="transform"
+            )
+        
+        # Validate input schema if enabled
+        if self.cfg.validate_schema and hasattr(self, '_training_columns'):
+            self._validate_transform_input(X)
+        
         Xt = self.pipeline_.transform(X)
         Xt_arr = Xt.toarray() if hasattr(Xt, "toarray") else np.asarray(Xt)
         cols = self.feature_names_ or [f"f_{i}" for i in range(Xt_arr.shape[1])]
         return pd.DataFrame(Xt_arr, columns=cols, index=X.index)
+    
+    def _validate_transform_input(self, X: pd.DataFrame) -> None:
+        """Validate that transform input matches training schema.
+        
+        Args:
+            X: Input DataFrame to validate
+            
+        Raises:
+            InputValidationError: If schema doesn't match
+        """
+        if not hasattr(self, '_training_columns'):
+            return
+        
+        missing_cols = set(self._training_columns) - set(X.columns)
+        if missing_cols:
+            raise InputValidationError(
+                f"Missing columns in transform input: {missing_cols}",
+                missing_columns=list(missing_cols),
+                expected_columns=self._training_columns
+            )
+        
+        extra_cols = set(X.columns) - set(self._training_columns)
+        if extra_cols:
+            logger.warning(f"Extra columns in transform input (will be ignored): {extra_cols}")
 
     def fit_transform(
         self, X: pd.DataFrame, y: pd.Series, estimator_family: str = "tree"
@@ -338,15 +421,66 @@ class AutoFeatureEngineer:
         return self.transform(X)
 
     def export(self, out_dir: str) -> PipelineSummary:
-        """Export fitted pipeline and metadata."""
+        """Export fitted pipeline and metadata to disk.
+        
+        Args:
+            out_dir: Directory path to save pipeline artifacts
+            
+        Returns:
+            PipelineSummary with export metadata
+            
+        Raises:
+            PipelineNotFittedError: If pipeline not fitted
+            ExportError: If export fails
+            
+        Security Warning:
+            The exported pipeline uses pickle serialization (via joblib).
+            **Only load pipeline files from trusted sources.**
+            
+            Loading untrusted pickles can execute arbitrary code (CWE-502).
+            
+            For production use with untrusted pipelines, consider:
+            - ONNX export (for supported models)
+            - JSON/YAML config + retrain pattern
+            - Containerization with read-only filesystem
+            - Use load_pipeline() with checksum verification
+        """
         if self.pipeline_ is None:
-            raise RuntimeError("Nothing to export. Fit a pipeline first.")
-        os.makedirs(out_dir, exist_ok=True)
-        joblib.dump(self.pipeline_, os.path.join(out_dir, "pipeline.joblib"))
+            raise PipelineNotFittedError(
+                "Cannot export: pipeline not fitted. Call fit() first.",
+                operation="export"
+            )
+        
+        try:
+            os.makedirs(out_dir, exist_ok=True)
+            
+            # Serialize pipeline and compute checksum for integrity
+            import hashlib
+            pipeline_path = os.path.join(out_dir, "pipeline.joblib")
+            pipeline_bytes = joblib.dumps(self.pipeline_)
+            checksum = hashlib.sha256(pipeline_bytes).hexdigest()
+            
+            # Write pipeline file
+            with open(pipeline_path, "wb") as f:
+                f.write(pipeline_bytes)
+            
+            # Write checksum file for verification
+            with open(os.path.join(out_dir, "pipeline.sha256"), "w") as f:
+                f.write(f"{checksum}  pipeline.joblib\n")
+            
+            logger.info(f"Pipeline exported with SHA256: {checksum[:16]}...")
+            
+        except Exception as e:
+            raise ExportError(
+                f"Failed to export pipeline: {e}",
+                output_directory=out_dir
+            ) from e
+        
         meta = {
             "summary": asdict(self.summary_) if self.summary_ else {},
             "config": self.cfg.model_dump(),
             "estimator_family": self.estimator_family_,
+            "pipeline_checksum_sha256": checksum,
             "task": self.task_.value if self.task_ else None,
         }
         with open(os.path.join(out_dir, "metadata.json"), "w", encoding="utf-8") as f:

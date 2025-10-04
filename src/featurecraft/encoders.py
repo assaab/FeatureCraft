@@ -122,13 +122,20 @@ class HashingEncoder(BaseEstimator, TransformerMixin):
         return int(h, 16) % self.n_features
 
     def transform(self, X: pd.DataFrame) -> sparse.csr_matrix:
-        """Transform using hashing."""
+        """Transform using hashing.
+        
+        Uses itertuples for efficient iteration (much faster than iterrows).
+        """
         df = pd.DataFrame(X)[self.columns_].astype(str)
         rows: list[dict[int, float]] = []
-        for _, row in df.iterrows():
+        columns = list(df.columns)
+        
+        # Use itertuples for better performance (10-100x faster than iterrows)
+        for row_tuple in df.itertuples(index=False, name=None):
             d: dict[int, float] = {}
-            for c, v in row.items():
-                idx = self._hash(f"{c}={v}")
+            for col_idx, value in enumerate(row_tuple):
+                col_name = columns[col_idx]
+                idx = self._hash(f"{col_name}={value}")
                 d[idx] = d.get(idx, 0.0) + 1.0
             rows.append(d)
         return to_csr_matrix(rows, self.n_features)
@@ -275,9 +282,13 @@ def make_ohe(min_frequency: float = 0.01, handle_unknown: str = "infrequent_if_e
         )
         # Test instantiation to ensure it works
         _ = encoder.get_params()
+        logger.debug("Using OneHotEncoder with modern sklearn parameters (sparse_output, drop)")
         return encoder
-    except (TypeError, AttributeError):
-        pass
+    except (TypeError, AttributeError) as e:
+        logger.warning(
+            f"OneHotEncoder instantiation with full parameters failed: {e}. "
+            f"Trying fallback without 'drop' parameter."
+        )
     
     # Try without drop parameter
     try:
@@ -287,9 +298,13 @@ def make_ohe(min_frequency: float = 0.01, handle_unknown: str = "infrequent_if_e
             sparse_output=True,
         )
         _ = encoder.get_params()
+        logger.debug("Using OneHotEncoder without 'drop' parameter")
         return encoder
-    except (TypeError, AttributeError):
-        pass
+    except (TypeError, AttributeError) as e:
+        logger.warning(
+            f"OneHotEncoder with sparse_output failed: {e}. "
+            f"Trying fallback with 'sparse' parameter (older sklearn)."
+        )
     
     # Try with sparse instead of sparse_output (older sklearn)
     try:
@@ -298,16 +313,27 @@ def make_ohe(min_frequency: float = 0.01, handle_unknown: str = "infrequent_if_e
             sparse=True,
         )
         _ = encoder.get_params()
+        logger.warning(
+            "Using older sklearn version - falling back to 'sparse' parameter. "
+            "Consider upgrading sklearn to 1.0+ for better features."
+        )
         return encoder
-    except (TypeError, AttributeError):
-        pass
+    except (TypeError, AttributeError) as e:
+        logger.warning(
+            f"OneHotEncoder with 'sparse' parameter failed: {e}. "
+            f"Using minimal fallback configuration."
+        )
     
     # Ultimate fallback - minimal parameters
+    logger.warning(
+        "Using minimal OneHotEncoder configuration. "
+        "All advanced features disabled. Consider upgrading sklearn."
+    )
     encoder = OneHotEncoder()
     try:
         encoder.set_params(handle_unknown="ignore")
-    except Exception:
-        logger.warning("Could not set handle_unknown='ignore', using defaults")
+    except Exception as e:
+        logger.warning(f"Could not set handle_unknown='ignore': {e}. Using defaults.")
     
     return encoder
 

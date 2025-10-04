@@ -57,12 +57,28 @@ ipython_config.py
 
 # Environments
 .env
+.env.local
+.env.*.local
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Secrets and credentials
+*.pypirc
+!.pypirc.example
+*config*.yaml
+*config*.json
+!*config*.example.*
+!*config*.template.*
+**/api_keys.txt
+**/credentials.json
+**/.secrets/
+**/.credentials/
+.secrets
+.credentials
 
 # IDEs
 .vscode/
@@ -88,3 +104,8 @@ logs/
 _audit_artifacts_*/
 *.log
 .DS_Store
+.pytest_cache/
+dist/
+logs/
+src/featurecraft/ai
+htmlcov/

@@ -697,6 +697,91 @@ class PipelineExplainer:
             "n_features_out": n_features_out,
         }
     
+    def explain(
+        self,
+        pipeline,
+        X,
+        task: str = 'classification'
+    ) -> PipelineExplanation:
+        """Explain a fitted pipeline.
+
+        Args:
+            pipeline: Fitted sklearn pipeline to explain
+            X: Input data sample for analysis
+            task: Task type ('classification' or 'regression')
+
+        Returns:
+            PipelineExplanation object with analysis results
+        """
+        from sklearn.utils.metaestimators import _BaseComposition
+        from sklearn.pipeline import Pipeline
+
+        # Reset explanation for new analysis
+        self.explanation = PipelineExplanation()
+
+        # Analyze pipeline steps
+        if hasattr(pipeline, 'steps'):
+            for step_name, step_transformer in pipeline.steps:
+                self._analyze_step(step_name, step_transformer, X)
+
+        # Set summary info
+        self.set_summary(
+            estimator_family=self._detect_estimator_family(pipeline),
+            task_type=task,
+            n_features_in=X.shape[1],
+            n_features_out=X.shape[1]  # For now, assume no feature reduction
+        )
+
+        return self.get_explanation()
+
+    def _analyze_step(self, step_name: str, transformer, X):
+        """Analyze a single pipeline step."""
+        # This is a simplified analysis - in a real implementation,
+        # you'd want more sophisticated pipeline inspection
+        try:
+            # Try to get feature names if available
+            if hasattr(transformer, 'get_feature_names_out'):
+                try:
+                    feature_names = transformer.get_feature_names_out()
+                    n_features = len(feature_names)
+                except:
+                    n_features = X.shape[1]
+            else:
+                n_features = X.shape[1]
+
+            self.explanation.add_explanation(
+                TransformationExplanation(
+                    category=DecisionCategory.TRANSFORMATION,
+                    operation=step_name,
+                    columns=[],  # Would need more analysis to determine this
+                    reason=f"Pipeline step: {step_name}",
+                    details={
+                        "transformer_type": type(transformer).__name__,
+                        "n_features": n_features,
+                    },
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Could not analyze step {step_name}: {e}")
+
+    def _detect_estimator_family(self, pipeline) -> str:
+        """Detect the estimator family from pipeline."""
+        try:
+            # Get the final estimator
+            if hasattr(pipeline, 'steps') and pipeline.steps:
+                final_step = pipeline.steps[-1][1]
+                estimator_name = type(final_step).__name__.lower()
+
+                if any(keyword in estimator_name for keyword in ['forest', 'tree', 'xgb', 'lgb']):
+                    return 'tree'
+                elif any(keyword in estimator_name for keyword in ['linear', 'logistic', 'ridge', 'lasso']):
+                    return 'linear'
+                else:
+                    return 'other'
+        except:
+            pass
+        return 'unknown'
+
     def get_explanation(self) -> PipelineExplanation:
         """Get the complete pipeline explanation."""
         return self.explanation

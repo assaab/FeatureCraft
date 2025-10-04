@@ -63,8 +63,28 @@ def load_from_env(prefix: str = "FEATURECRAFT") -> Dict[str, Any]:
     return config
 
 
+MAX_ENV_VALUE_LENGTH = 10000  # Prevent DoS via huge env vars
+
+
 def _infer_type(value: str) -> Any:
-    """Infer Python type from string value."""
+    """Infer Python type from string value with security checks.
+    
+    Args:
+        value: String value from environment variable
+        
+    Returns:
+        Inferred Python type (bool, int, float, dict, list, or str)
+        
+    Raises:
+        ValueError: If value exceeds maximum length
+    """
+    # Security: Prevent DoS via huge environment variables
+    if len(value) > MAX_ENV_VALUE_LENGTH:
+        raise ValueError(
+            f"Environment variable value too long (>{MAX_ENV_VALUE_LENGTH} chars). "
+            f"Received {len(value)} chars."
+        )
+    
     # Try boolean
     if value.lower() in ("true", "yes", "1", "on"):
         return True
@@ -130,9 +150,14 @@ def load_from_file(path: str | Path) -> Dict[str, Any]:
                     return tomllib.load(fb)
             else:
                 raise ValueError(f"Unsupported config file format: {suffix}")
-    except Exception as e:
+    except (OSError, ValueError, yaml.YAMLError, json.JSONDecodeError) as e:
         logger.error(f"Failed to load config from {path}: {e}")
-        raise
+        from .exceptions import ConfigurationError
+        raise ConfigurationError(
+            f"Failed to load configuration file: {e}",
+            config_file=str(path),
+            error_type=type(e).__name__
+        ) from e
 
 
 def parse_cli_overrides(overrides: list[str]) -> Dict[str, Any]:

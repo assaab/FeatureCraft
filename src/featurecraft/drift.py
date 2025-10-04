@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -29,7 +29,13 @@ def psi_categorical(reference: pd.Series, current: pd.Series) -> float:
     ref_clean = reference.dropna()
     curr_clean = current.dropna()
     
+    # Explicit check for empty distributions - prevent division by zero and invalid PSI
     if len(ref_clean) == 0 or len(curr_clean) == 0:
+        logger.warning(
+            "Cannot compute PSI: one or both distributions are empty. "
+            f"Reference size: {len(ref_clean)}, Current size: {len(curr_clean)}. "
+            "Returning PSI = 0.0"
+        )
         return 0.0
     
     # Get proportions
@@ -172,7 +178,7 @@ class DriftDetector:
 
 def summarize_drift_report(
     drift_results: Dict[str, Tuple[float, str]]
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """Summarize drift detection results.
     
     Args:

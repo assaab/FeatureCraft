@@ -153,20 +153,41 @@ def sample_df(
             from sklearn.model_selection import train_test_split
             
             sample_size = n if n is not None else int(len(df) * frac)
+            
+            # Ensure we don't try to sample more than available
+            if sample_size >= len(df):
+                return df
+            
             _, sampled = train_test_split(
                 df,
                 train_size=len(df) - sample_size,
                 stratify=df[stratify_by],
                 random_state=random_state,
             )
-            return sampled
         else:
             # Random sampling
-            return df.sample(n=n, frac=frac, random_state=random_state)
+            sampled = df.sample(n=n, frac=frac, random_state=random_state)
+        
+        # Validate that sampling didn't result in empty DataFrame
+        if len(sampled) == 0:
+            warnings.warn(
+                f"Sampling resulted in empty DataFrame (n={n}, frac={frac}). "
+                f"Returning original DataFrame."
+            )
+            return df
+        
+        return sampled
     except Exception as e:
         # Fallback to simple random sampling
         warnings.warn(f"Stratified sampling failed: {e}. Using random sampling.")
-        return df.sample(n=n, frac=frac, random_state=random_state)
+        sampled = df.sample(n=n, frac=frac, random_state=random_state)
+        
+        # Validate fallback sampling result
+        if len(sampled) == 0:
+            warnings.warn("Sampling resulted in empty DataFrame. Returning original.")
+            return df
+        
+        return sampled
 
 
 def safe_feature_names_out(transformer: Any, input_features: list[str] | None = None) -> list[str]:
