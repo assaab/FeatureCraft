@@ -207,6 +207,242 @@ class FeatureCraftConfig(BaseModel):
         default=200, ge=2, le=1000,
         description="SVD components for text when using tree models"
     )
+    
+    # Text Statistics & Basic NLP
+    text_extract_statistics: bool = Field(
+        default=True,
+        description="Extract basic text statistics (char_count, word_count, avg_word_length, etc.)"
+    )
+    text_extract_linguistic: bool = Field(
+        default=False,
+        description="Extract linguistic features (stopword_count, punctuation_count, uppercase_ratio, etc.)"
+    )
+    text_stopwords_language: str = Field(
+        default="english",
+        description="Language for stopwords detection (english, spanish, french, german, etc.)"
+    )
+    
+    # Sentiment Analysis
+    text_extract_sentiment: bool = Field(
+        default=False,
+        description="Extract sentiment polarity and subjectivity using TextBlob"
+    )
+    text_sentiment_method: str = Field(
+        default="textblob",
+        description="Sentiment analysis method: textblob, vader"
+    )
+    
+    # Word Embeddings
+    text_use_word_embeddings: bool = Field(
+        default=False,
+        description="Use pre-trained word embeddings (Word2Vec, GloVe) for text features"
+    )
+    text_embedding_method: str = Field(
+        default="word2vec",
+        description="Word embedding method: word2vec, glove, fasttext"
+    )
+    text_embedding_dims: int = Field(
+        default=100, ge=50, le=300,
+        description="Dimensionality of word embeddings (50, 100, 200, 300)"
+    )
+    text_embedding_aggregation: str = Field(
+        default="mean",
+        description="Aggregation method for word embeddings: mean, max, sum"
+    )
+    text_embedding_pretrained_path: Optional[str] = Field(
+        default=None,
+        description="Path to pre-trained word embeddings file (e.g., glove.6B.100d.txt)"
+    )
+    
+    # Sentence Embeddings (Transformers)
+    text_use_sentence_embeddings: bool = Field(
+        default=False,
+        description="Use transformer-based sentence embeddings (BERT, SentenceTransformers)"
+    )
+    text_sentence_model: str = Field(
+        default="all-MiniLM-L6-v2",
+        description="SentenceTransformer model name (e.g., all-MiniLM-L6-v2, paraphrase-mpnet-base-v2)"
+    )
+    text_sentence_batch_size: int = Field(
+        default=32, ge=1, le=256,
+        description="Batch size for sentence embedding encoding"
+    )
+    text_sentence_max_length: int = Field(
+        default=128, ge=32, le=512,
+        description="Maximum sequence length for sentence embeddings"
+    )
+    
+    # Named Entity Recognition (NER)
+    text_extract_ner: bool = Field(
+        default=False,
+        description="Extract named entity features using spaCy (person_count, org_count, location_count)"
+    )
+    text_ner_model: str = Field(
+        default="en_core_web_sm",
+        description="spaCy model for NER (en_core_web_sm, en_core_web_md, en_core_web_lg)"
+    )
+    text_ner_entity_types: List[str] = Field(
+        default_factory=lambda: ["PERSON", "ORG", "GPE", "LOC", "DATE", "MONEY"],
+        description="Entity types to extract counts for"
+    )
+    
+    # Topic Modeling
+    text_use_topic_modeling: bool = Field(
+        default=False,
+        description="Use topic modeling (LDA) to extract topic distributions"
+    )
+    text_topic_n_topics: int = Field(
+        default=10, ge=2, le=100,
+        description="Number of topics for LDA topic modeling"
+    )
+    text_topic_max_features: int = Field(
+        default=5000, ge=100, le=50000,
+        description="Maximum features for topic modeling vectorizer"
+    )
+    
+    # Readability & Complexity
+    text_extract_readability: bool = Field(
+        default=False,
+        description="Extract readability scores (Flesch-Kincaid, SMOG, etc.)"
+    )
+    text_readability_metrics: List[str] = Field(
+        default_factory=lambda: ["flesch_reading_ease", "flesch_kincaid_grade", "smog_index"],
+        description="Readability metrics to compute"
+    )
+    
+    # Advanced Text Processing
+    text_min_word_freq: int = Field(
+        default=5, ge=1, le=100,
+        description="Minimum word frequency for vocabulary (filters rare words)"
+    )
+    text_remove_stopwords: bool = Field(
+        default=False,
+        description="Remove stopwords in TF-IDF/vectorization"
+    )
+    text_lowercase: bool = Field(
+        default=True,
+        description="Convert text to lowercase before processing"
+    )
+    text_remove_special_chars: bool = Field(
+        default=False,
+        description="Remove special characters and punctuation from text"
+    )
+    text_lemmatize: bool = Field(
+        default=False,
+        description="Apply lemmatization to text (requires spaCy)"
+    )
+    text_stem: bool = Field(
+        default=False,
+        description="Apply stemming to text (Porter stemmer)"
+    )
+
+    # ========== Feature Interactions ==========
+    interactions_enabled: bool = Field(
+        default=False,
+        description="Enable feature interaction generation"
+    )
+    
+    # Arithmetic Interactions
+    interactions_use_arithmetic: bool = Field(
+        default=True,
+        description="Create arithmetic interactions (add, subtract, multiply, divide)"
+    )
+    interactions_arithmetic_ops: List[str] = Field(
+        default_factory=lambda: ['multiply', 'divide'],
+        description="Arithmetic operations to use: add, subtract, multiply, divide"
+    )
+    interactions_max_arithmetic_pairs: int = Field(
+        default=100, ge=1, le=1000,
+        description="Maximum number of feature pairs for arithmetic interactions"
+    )
+    
+    # Polynomial Interactions
+    interactions_use_polynomial: bool = Field(
+        default=True,
+        description="Create polynomial features (x², x³, x₁×x₂, etc.)"
+    )
+    interactions_polynomial_degree: int = Field(
+        default=2, ge=2, le=3,
+        description="Degree of polynomial features (2=quadratic, 3=cubic)"
+    )
+    interactions_polynomial_interaction_only: bool = Field(
+        default=False,
+        description="Only create interaction terms (no x², x³)"
+    )
+    interactions_polynomial_max_features: int = Field(
+        default=10, ge=2, le=50,
+        description="Maximum input features for polynomial expansion (prevents explosion)"
+    )
+    
+    # Ratio Features
+    interactions_use_ratios: bool = Field(
+        default=True,
+        description="Create ratio and proportion features"
+    )
+    interactions_ratios_include_proportions: bool = Field(
+        default=True,
+        description="Include A/(A+B) style proportions"
+    )
+    interactions_ratios_include_log: bool = Field(
+        default=False,
+        description="Include log(A/B) ratio features"
+    )
+    interactions_max_ratio_pairs: int = Field(
+        default=50, ge=1, le=500,
+        description="Maximum number of feature pairs for ratio features"
+    )
+    
+    # Product Interactions (multi-way)
+    interactions_use_products: bool = Field(
+        default=False,
+        description="Create multi-way product interactions (A×B×C)"
+    )
+    interactions_product_n_way: int = Field(
+        default=3, ge=2, le=5,
+        description="Number of features to multiply together (3-way, 4-way, etc.)"
+    )
+    interactions_max_products: int = Field(
+        default=20, ge=1, le=100,
+        description="Maximum number of product interactions to create"
+    )
+    
+    # Categorical × Numeric Interactions
+    interactions_use_categorical_numeric: bool = Field(
+        default=True,
+        description="Create categorical×numeric interactions (group statistics, deviations)"
+    )
+    interactions_cat_num_strategy: str = Field(
+        default='both',
+        description="Strategy: 'group_stats', 'deviation', or 'both'"
+    )
+    interactions_max_cat_num_pairs: int = Field(
+        default=20, ge=1, le=200,
+        description="Maximum number of categorical-numeric pairs"
+    )
+    
+    # Binned Interactions
+    interactions_use_binned: bool = Field(
+        default=False,
+        description="Create binned interactions (bin numeric features then interact)"
+    )
+    interactions_n_bins: int = Field(
+        default=5, ge=2, le=20,
+        description="Number of bins for binned interactions"
+    )
+    interactions_max_features_to_bin: int = Field(
+        default=5, ge=1, le=20,
+        description="Maximum number of features to bin"
+    )
+    
+    # Domain-specific interactions
+    interactions_specific_pairs: Optional[List[Tuple[str, str]]] = Field(
+        default=None,
+        description="Specific feature pairs to interact (e.g., [('age', 'income')])"
+    )
+    interactions_domain_formulas: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Domain-specific formulas (e.g., {'bmi': 'weight / (height ** 2)'})"
+    )
 
     # ========== Datetime & Time Series ==========
     ts_default_lags: List[int] = Field(
@@ -236,6 +472,44 @@ class FeatureCraftConfig(BaseModel):
     time_order: Optional[str] = Field(
         default=None,
         description="Column to sort by for time-ordered operations"
+    )
+    
+    # Datetime Feature Extraction Options
+    dt_extract_basic: bool = Field(
+        default=True,
+        description="Extract basic datetime features (year, month, day, hour, minute, second, day_of_week, week_of_year, quarter, day_of_year)"
+    )
+    dt_extract_cyclical: bool = Field(
+        default=True,
+        description="Extract cyclical sin/cos encodings for datetime components (month, day_of_week, hour, day_of_year)"
+    )
+    dt_extract_boolean_flags: bool = Field(
+        default=True,
+        description="Extract boolean flags (is_weekend, is_month_start, is_month_end, is_quarter_start, is_quarter_end, is_year_start, is_year_end)"
+    )
+    dt_extract_season: bool = Field(
+        default=True,
+        description="Extract season feature (0=winter, 1=spring, 2=summer, 3=fall)"
+    )
+    dt_extract_business: bool = Field(
+        default=True,
+        description="Extract business logic features (is_business_hour, business_days_in_month)"
+    )
+    dt_extract_relative: bool = Field(
+        default=False,
+        description="Extract relative time features (days/weeks/months since reference date)"
+    )
+    dt_reference_date: Optional[str] = Field(
+        default=None,
+        description="Reference date for relative time features (ISO format: YYYY-MM-DD)"
+    )
+    dt_business_hour_start: int = Field(
+        default=9, ge=0, le=23,
+        description="Start hour for business hours (default 9am)"
+    )
+    dt_business_hour_end: int = Field(
+        default=17, ge=0, le=23,
+        description="End hour for business hours (default 5pm)"
     )
 
     # ========== Reducers ==========
