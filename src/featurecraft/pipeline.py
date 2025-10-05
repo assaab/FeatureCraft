@@ -1100,6 +1100,9 @@ class AutoFeatureEngineer:
         # Text - Custom selector for text columns (using module-level class)
         text_transformers = []
         if text_cols:
+            from .text import build_comprehensive_text_pipeline
+            
+            # Determine which NLP features are enabled
             text_method = "Hashing Vectorizer" if cfg.text_use_hashing else "TF-IDF"
             svd_k = (
                 None
@@ -1107,9 +1110,31 @@ class AutoFeatureEngineer:
                 else cfg.svd_components_for_trees
             )
             
+            # Build comprehensive feature list
+            enabled_features = []
+            if cfg.text_extract_statistics:
+                enabled_features.append("text statistics (char/word/sentence counts, avg_word_length, etc.)")
+            if cfg.text_extract_linguistic:
+                enabled_features.append("linguistic features (stopwords, punctuation, uppercase ratio)")
+            if cfg.text_extract_sentiment:
+                enabled_features.append(f"sentiment analysis ({cfg.text_sentiment_method})")
+            if cfg.text_use_word_embeddings:
+                enabled_features.append(f"word embeddings ({cfg.text_embedding_method}, {cfg.text_embedding_dims}D)")
+            if cfg.text_use_sentence_embeddings:
+                enabled_features.append(f"sentence embeddings ({cfg.text_sentence_model})")
+            if cfg.text_extract_ner:
+                enabled_features.append(f"named entity recognition ({cfg.text_ner_model})")
+            if cfg.text_use_topic_modeling:
+                enabled_features.append(f"topic modeling (LDA with {cfg.text_topic_n_topics} topics)")
+            if cfg.text_extract_readability:
+                enabled_features.append("readability scores (Flesch-Kincaid, SMOG, etc.)")
+            
+            enabled_features.append(f"{text_method} vectorization")
+            
             details = {
                 "n_columns": len(text_cols),
-                "method": text_method,
+                "base_method": text_method,
+                "enabled_features": enabled_features,
             }
             
             if cfg.text_use_hashing:
@@ -1120,16 +1145,19 @@ class AutoFeatureEngineer:
             if svd_k:
                 details["svd_components"] = svd_k
             
+            # Build comprehensive reason string
             reason = (
-                f"Processing {len(text_cols)} text columns using {text_method}. "
+                f"Processing {len(text_cols)} text columns with comprehensive NLP feature engineering. "
+                f"Enabled features: {', '.join(enabled_features)}. "
             )
+            
             if cfg.text_use_hashing:
-                reason += f"Hashing vectorizer provides memory-efficient text encoding with {cfg.text_hashing_features} features."
+                reason += f"Hashing vectorizer provides memory-efficient encoding with {cfg.text_hashing_features} features. "
             else:
-                reason += f"TF-IDF captures term importance across documents with up to {cfg.tfidf_max_features} features."
+                reason += f"TF-IDF captures term importance with up to {cfg.tfidf_max_features} features. "
             
             if svd_k:
-                reason += f" Applying SVD dimensionality reduction to {svd_k} components for tree models."
+                reason += f"Applying SVD dimensionality reduction to {svd_k} components for tree models."
             
             self.explainer_.explain_text_processing(
                 columns=text_cols,
@@ -1141,34 +1169,64 @@ class AutoFeatureEngineer:
                     "tfidf_max_features": cfg.tfidf_max_features,
                     "svd_components_for_trees": svd_k,
                     "text_char_ngrams": cfg.text_char_ngrams,
+                    "text_extract_statistics": cfg.text_extract_statistics,
+                    "text_extract_sentiment": cfg.text_extract_sentiment,
+                    "text_use_word_embeddings": cfg.text_use_word_embeddings,
+                    "text_use_sentence_embeddings": cfg.text_use_sentence_embeddings,
+                    "text_extract_ner": cfg.text_extract_ner,
+                    "text_use_topic_modeling": cfg.text_use_topic_modeling,
+                    "text_extract_readability": cfg.text_extract_readability,
                 },
             )
             
+            # Build comprehensive text pipeline for each text column
             for c in text_cols:
+                text_pipeline = build_comprehensive_text_pipeline(
+                    column_name=c,
+                    cfg=cfg,
+                )
+                
                 text_transformers.append(
                     (
                         f"text_{c}", 
-                        build_text_pipeline(
-                            c, 
-                            cfg.tfidf_max_features, 
-                            svd_k,
-                            use_hashing=cfg.text_use_hashing,
-                            hashing_features=cfg.text_hashing_features,
-                            char_ngrams=cfg.text_char_ngrams,
-                        ), 
+                        text_pipeline,
                         c
                     )
                 )
 
-        # Datetime expansion with optional Fourier & holiday features
+        # Datetime expansion with comprehensive feature engineering
         if dt_cols:
             from .time_series import FourierFeatures, HolidayFeatures
-            dt_steps = [("base", DateTimeFeatures(dt_cols))]
             
-            features_generated = [
-                "year", "quarter", "month", "weekday", "hour", "is_weekend",
-                "month_sin/cos", "weekday_sin/cos", "hour_sin/cos"
-            ]
+            # Build comprehensive DateTimeFeatures transformer with config options
+            dt_base = DateTimeFeatures(
+                dt_cols,
+                extract_basic=cfg.dt_extract_basic,
+                extract_cyclical=cfg.dt_extract_cyclical,
+                extract_boolean_flags=cfg.dt_extract_boolean_flags,
+                extract_season=cfg.dt_extract_season,
+                extract_business=cfg.dt_extract_business,
+                extract_relative=cfg.dt_extract_relative,
+                reference_date=cfg.dt_reference_date,
+                business_hour_start=cfg.dt_business_hour_start,
+                business_hour_end=cfg.dt_business_hour_end,
+            )
+            dt_steps = [("base", dt_base)]
+            
+            # Track features generated for explainability
+            features_generated = []
+            if cfg.dt_extract_basic:
+                features_generated.append("basic (year, month, day, day_of_week, week_of_year, quarter, day_of_year, hour, minute, second)")
+            if cfg.dt_extract_cyclical:
+                features_generated.append("cyclical (month_sin/cos, day_of_week_sin/cos, day_of_year_sin/cos, hour_sin/cos)")
+            if cfg.dt_extract_boolean_flags:
+                features_generated.append("boolean flags (is_weekend, is_month_start/end, is_quarter_start/end, is_year_start/end)")
+            if cfg.dt_extract_season:
+                features_generated.append("season (0=winter, 1=spring, 2=summer, 3=fall)")
+            if cfg.dt_extract_business:
+                features_generated.append(f"business logic (is_business_hour {cfg.dt_business_hour_start}-{cfg.dt_business_hour_end}, business_days_in_month)")
+            if cfg.dt_extract_relative and cfg.dt_reference_date:
+                features_generated.append(f"relative time (days/weeks/months since {cfg.dt_reference_date})")
             
             # Add Fourier features if enabled
             if cfg.use_fourier and cfg.time_column:
@@ -1177,25 +1235,41 @@ class AutoFeatureEngineer:
                     dt_steps.append(
                         (f"fourier_{col}", FourierFeatures(column=col, orders=cfg.fourier_orders))
                     )
+            
             # Add holiday features if enabled
             if cfg.holiday_country and cfg.time_column:
-                features_generated.append(f"holidays ({cfg.holiday_country})")
+                features_generated.append(f"holidays ({cfg.holiday_country}: is_holiday, days_to_holiday, days_from_holiday)")
                 for col in dt_cols:
                     dt_steps.append(
-                        (f"holiday_{col}", HolidayFeatures(column=col, country_code=cfg.holiday_country))
+                        (f"holiday_{col}", HolidayFeatures(
+                            column=col, 
+                            country_code=cfg.holiday_country,
+                            extract_days_to=True,
+                            extract_days_from=True,
+                        ))
                     )
             
+            # Explain datetime processing to user
             self.explainer_.explain_datetime_processing(
                 columns=dt_cols,
                 features_generated=features_generated,
                 config_params={
+                    "extract_basic": cfg.dt_extract_basic,
+                    "extract_cyclical": cfg.dt_extract_cyclical,
+                    "extract_boolean_flags": cfg.dt_extract_boolean_flags,
+                    "extract_season": cfg.dt_extract_season,
+                    "extract_business": cfg.dt_extract_business,
+                    "extract_relative": cfg.dt_extract_relative,
+                    "reference_date": cfg.dt_reference_date,
+                    "business_hour_start": cfg.dt_business_hour_start,
+                    "business_hour_end": cfg.dt_business_hour_end,
                     "use_fourier": cfg.use_fourier,
                     "fourier_orders": cfg.fourier_orders if cfg.use_fourier else None,
                     "holiday_country": cfg.holiday_country,
                 },
             )
             
-            dt_pipe = Pipeline(steps=dt_steps) if len(dt_steps) > 0 else DateTimeFeatures(dt_cols)
+            dt_pipe = Pipeline(steps=dt_steps) if len(dt_steps) > 0 else dt_base
         else:
             dt_pipe = "drop"
 
@@ -1255,7 +1329,76 @@ class AutoFeatureEngineer:
         # STEP 2: Main preprocessing
         pipe_steps.append(("preprocess", preprocessor))
         
-        # STEP 3: Optional dimensionality reducer
+        # STEP 3: Feature Interactions (optional, after preprocessing)
+        if cfg.interactions_enabled:
+            from .interactions import build_interaction_pipeline
+            from sklearn.pipeline import FeatureUnion
+            
+            logger.info("Building feature interaction pipeline...")
+            
+            # Build interaction transformers
+            interaction_transformers = build_interaction_pipeline(cfg, X)
+            
+            if interaction_transformers:
+                # Create a FeatureUnion to combine all interaction types
+                interaction_union = FeatureUnion(
+                    transformer_list=interaction_transformers,
+                    n_jobs=1,  # Keep sequential for stability
+                )
+                
+                # Wrap in a pipeline step
+                pipe_steps.append(("interactions", interaction_union))
+                
+                # Explain interaction feature engineering
+                enabled_interactions = []
+                if cfg.interactions_use_arithmetic:
+                    enabled_interactions.append(
+                        f"Arithmetic ({', '.join(cfg.interactions_arithmetic_ops)})"
+                    )
+                if cfg.interactions_use_polynomial:
+                    degree_str = "interaction-only" if cfg.interactions_polynomial_interaction_only else f"degree-{cfg.interactions_polynomial_degree}"
+                    enabled_interactions.append(f"Polynomial ({degree_str})")
+                if cfg.interactions_use_ratios:
+                    enabled_interactions.append("Ratios & Proportions")
+                if cfg.interactions_use_products:
+                    enabled_interactions.append(f"{cfg.interactions_product_n_way}-way Products")
+                if cfg.interactions_use_categorical_numeric:
+                    enabled_interactions.append(f"Categorical×Numeric ({cfg.interactions_cat_num_strategy})")
+                if cfg.interactions_use_binned:
+                    enabled_interactions.append(f"Binned Interactions ({cfg.interactions_n_bins} bins)")
+                
+                self.explainer_.explain_transformation(
+                    transform_name="Feature Interactions",
+                    columns=num_cols + cat_cols,  # Interactions use both numeric and categorical
+                    reason=(
+                        "Creating feature interactions to capture non-linear relationships and "
+                        "cross-feature patterns that linear models cannot learn directly. "
+                        f"Enabled interaction types: {', '.join(enabled_interactions)}."
+                    ),
+                    details={
+                        "interaction_types": enabled_interactions,
+                        "arithmetic_ops": cfg.interactions_arithmetic_ops,
+                        "polynomial_degree": cfg.interactions_polynomial_degree,
+                        "cat_num_strategy": cfg.interactions_cat_num_strategy,
+                        "n_bins": cfg.interactions_n_bins,
+                    },
+                    config_params={
+                        "interactions_enabled": cfg.interactions_enabled,
+                        "arithmetic": cfg.interactions_use_arithmetic,
+                        "polynomial": cfg.interactions_use_polynomial,
+                        "polynomial_degree": cfg.interactions_polynomial_degree if cfg.interactions_use_polynomial else None,
+                        "ratios": cfg.interactions_use_ratios,
+                        "products": cfg.interactions_use_products,
+                        "categorical_numeric": cfg.interactions_use_categorical_numeric,
+                        "binned": cfg.interactions_use_binned,
+                    },
+                )
+                
+                logger.info(f"Feature interactions enabled: {', '.join(enabled_interactions)}")
+            else:
+                logger.warning("Feature interactions enabled but no transformers were built")
+        
+        # STEP 4: Optional dimensionality reducer
         if cfg.reducer_kind:
             from .transformers import DimensionalityReducer
             
@@ -1314,7 +1457,7 @@ class AutoFeatureEngineer:
         return pipe
 
     def _get_feature_names(self, X: pd.DataFrame) -> list[str]:
-        """Get feature names from fitted pipeline by performing dummy transform."""
+        """Get feature names from ALL fitted pipeline steps."""
         names: list[str] = []
         if self.pipeline_ is None:
             return names
@@ -1325,9 +1468,53 @@ class AutoFeatureEngineer:
         Xt_arr = Xt.toarray() if hasattr(Xt, "toarray") else np.asarray(Xt)
         n_features_total = Xt_arr.shape[1]
 
-        pre: ColumnTransformer = self.pipeline_.named_steps["preprocess"]
+        # Collect names from EACH pipeline step that produces features
+        for step_name, step_transformer in self.pipeline_.steps:
+            if step_name == "schema_validator":
+                continue  # Doesn't produce features
+            
+            if step_name == "preprocess":
+                # Handle ColumnTransformer (existing logic)
+                names.extend(self._get_names_from_column_transformer(step_transformer, sample, X))
+            
+            elif step_name == "interactions":
+                # Handle FeatureUnion (NEW: this was missing!)
+                names.extend(self._get_names_from_feature_union(step_transformer, sample))
+            
+            elif step_name == "reducer":
+                # Handle dimensionality reducer
+                names.extend(self._get_names_from_reducer(step_transformer, names))
 
-        for name, trans, cols in pre.transformers_:
+        # Ensure name count matches actual output
+        if len(names) != n_features_total:
+            logger.warning(
+                f"Feature name count mismatch: {len(names)} names vs {n_features_total} actual. "
+                f"Collected from pipeline steps, but got {len(names)} != {n_features_total}. "
+                "Using generic names as fallback."
+            )
+            names = [f"feature_{i}" for i in range(n_features_total)]
+
+        return names
+
+    def _get_names_from_column_transformer(
+        self, 
+        column_transformer: ColumnTransformer,
+        sample: pd.DataFrame,
+        X: pd.DataFrame
+    ) -> list[str]:
+        """Extract feature names from ColumnTransformer (preprocess step).
+        
+        Args:
+            column_transformer: The ColumnTransformer instance
+            sample: Small sample of data for transformation
+            X: Original input DataFrame
+            
+        Returns:
+            List of feature names from this transformer
+        """
+        names: list[str] = []
+        
+        for name, trans, cols in column_transformer.transformers_:
             if name == "remainder":
                 continue
 
@@ -1339,8 +1526,8 @@ class AutoFeatureEngineer:
                     fn = trans.get_feature_names_out(colnames)
                     names.extend([str(x) for x in fn])
                     continue
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"get_feature_names_out failed for {name}: {e}")
 
             # Fallback: infer from actual transformer output
             try:
@@ -1366,13 +1553,89 @@ class AutoFeatureEngineer:
                 # Ultimate fallback: use column names
                 logger.warning(f"Failed to infer feature names for {name}: {e}. Using fallback.")
                 names.extend([f"{name}__{c}" for c in colnames])
+        
+        return names
 
-        # Ensure name count matches actual output
-        if len(names) != n_features_total:
-            logger.warning(
-                f"Feature name count mismatch: {len(names)} names vs {n_features_total} actual. "
-                "Using generic names."
-            )
-            names = [f"feature_{i}" for i in range(n_features_total)]
+    def _get_names_from_feature_union(
+        self,
+        feature_union: FeatureUnion,
+        sample: pd.DataFrame
+    ) -> list[str]:
+        """Extract feature names from FeatureUnion (interactions step).
+        
+        Args:
+            feature_union: The FeatureUnion instance (contains interaction transformers)
+            sample: Small sample of data for transformation
+            
+        Returns:
+            List of feature names from all transformers in the union
+        """
+        names: list[str] = []
+        
+        # FeatureUnion has transformer_list: List[Tuple[str, transformer]]
+        for trans_name, transformer in feature_union.transformer_list:
+            # Try to get feature names directly
+            if hasattr(transformer, 'get_feature_names_out'):
+                try:
+                    trans_names = transformer.get_feature_names_out()
+                    names.extend([str(n) for n in trans_names])
+                    logger.debug(f"Got {len(trans_names)} feature names from {trans_name}")
+                    continue
+                except Exception as e:
+                    logger.debug(f"get_feature_names_out failed for {trans_name}: {e}")
+            
+            # Fallback: transform sample and count features
+            try:
+                trans_output = transformer.transform(sample)
+                trans_arr = trans_output.toarray() if hasattr(trans_output, "toarray") else np.asarray(trans_output)
+                n_feats = trans_arr.shape[1]
+                fallback_names = [f"{trans_name}__feat_{i}" for i in range(n_feats)]
+                names.extend(fallback_names)
+                logger.warning(
+                    f"{trans_name} doesn't support get_feature_names_out properly. "
+                    f"Using fallback names for {n_feats} features."
+                )
+            except Exception as e:
+                logger.error(f"Failed to get names from {trans_name}: {e}")
+        
+        return names
 
+    def _get_names_from_reducer(
+        self,
+        reducer: BaseEstimator,
+        input_names: list[str]
+    ) -> list[str]:
+        """Extract feature names from dimensionality reducer.
+        
+        Args:
+            reducer: The dimensionality reducer (PCA, etc.)
+            input_names: Names of features before reduction
+            
+        Returns:
+            List of feature names after reduction
+        """
+        names: list[str] = []
+        
+        # Try to get feature names
+        if hasattr(reducer, 'get_feature_names_out'):
+            try:
+                names = [str(n) for n in reducer.get_feature_names_out(input_names)]
+                return names
+            except Exception as e:
+                logger.debug(f"get_feature_names_out failed for reducer: {e}")
+        
+        # Fallback: generate generic names based on n_components
+        if hasattr(reducer, 'n_components_'):
+            n_components = reducer.n_components_
+        elif hasattr(reducer, 'n_components'):
+            n_components = reducer.n_components
+        else:
+            # Can't determine, return empty
+            logger.warning("Could not determine number of components from reducer")
+            return []
+        
+        # Generate names like "pca_0", "pca_1", etc.
+        reducer_name = reducer.__class__.__name__.lower()
+        names = [f"{reducer_name}_{i}" for i in range(n_components)]
+        
         return names
