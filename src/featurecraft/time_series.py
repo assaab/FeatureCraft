@@ -110,21 +110,33 @@ class FourierFeatures(BaseEstimator, TransformerMixin):
 
 
 class HolidayFeatures(BaseEstimator, TransformerMixin):
-    """Generate holiday features using holidays package."""
+    """Generate holiday features using holidays package.
+    
+    Features generated:
+    - is_holiday: Binary flag indicating if date is a holiday
+    - days_to_holiday: Days until next holiday (forward-looking)
+    - days_from_holiday: Days since last holiday (backward-looking)
+    """
     
     def __init__(
         self,
         column: str,
         country_code: Optional[str] = None,
+        extract_days_to: bool = True,
+        extract_days_from: bool = True,
     ) -> None:
         """Initialize holiday features.
         
         Args:
             column: Date column name
             country_code: Country code for holidays (e.g., 'US', 'GB', 'FR')
+            extract_days_to: Extract days_to_holiday feature (forward-looking)
+            extract_days_from: Extract days_from_holiday feature (backward-looking)
         """
         self.column = column
         self.country_code = country_code
+        self.extract_days_to = extract_days_to
+        self.extract_days_from = extract_days_from
         self.holidays_ = None
         self.feature_names_: list[str] = []
     
@@ -134,18 +146,19 @@ class HolidayFeatures(BaseEstimator, TransformerMixin):
             try:
                 import holidays
                 
-                # Get holidays for the country
-                self.holidays_ = getattr(holidays, self.country_code, None)
+                # Get holidays instance for the country
+                self.holidays_ = holidays.country_holidays(self.country_code)
                 if self.holidays_ is None:
                     logger.warning(
                         f"Country code '{self.country_code}' not recognized. "
                         "Holiday features disabled."
                     )
-            except ImportError:
+            except (ImportError, AttributeError, KeyError) as e:
                 logger.warning(
-                    "holidays package not installed. "
+                    f"Could not load holidays for '{self.country_code}': {e}. "
                     "Install with: pip install holidays"
                 )
+                self.holidays_ = None
         
         return self
     
@@ -164,24 +177,57 @@ class HolidayFeatures(BaseEstimator, TransformerMixin):
         # Convert to datetime
         date_series = pd.to_datetime(df[self.column], errors='coerce')
         
+        # Get year range from the data to populate holidays cache
+        valid_dates = date_series.dropna()
+        if len(valid_dates) == 0:
+            return out
+        
+        min_year = valid_dates.min().year
+        max_year = valid_dates.max().year
+        
+        # Expand the year range by 1 year on each side to ensure we catch nearby holidays
+        years = range(min_year - 1, max_year + 2)
+        
+        # Populate holidays cache for all years in our data range
+        # This forces the lazy holidays object to generate holidays for these years
+        for year in years:
+            _ = self.holidays_.get(pd.Timestamp(f'{year}-01-01').date())
+        
+        # Now get all holiday dates from the populated cache
+        holiday_dates = sorted(self.holidays_.keys())
+        
         # Check if date is a holiday
         out[f"{self.column}_is_holiday"] = date_series.apply(
-            lambda x: 1 if pd.notna(x) and x.date() in self.holidays_() else 0
+            lambda x: 1 if pd.notna(x) and x.date() in self.holidays_ else 0
         )
         
-        # Days until next holiday
-        def days_to_holiday(date):
-            if pd.isna(date):
+        # Days until next holiday (forward-looking)
+        if self.extract_days_to:
+            def days_to_holiday(date):
+                if pd.isna(date):
+                    return np.nan
+                
+                future_holidays = [h for h in holiday_dates if h > date.date()]
+                
+                if future_holidays:
+                    return (future_holidays[0] - date.date()).days
                 return np.nan
             
-            holiday_dates = sorted(self.holidays_().keys())
-            future_holidays = [h for h in holiday_dates if h > date.date()]
-            
-            if future_holidays:
-                return (future_holidays[0] - date.date()).days
-            return np.nan
+            out[f"{self.column}_days_to_holiday"] = date_series.apply(days_to_holiday)
         
-        out[f"{self.column}_days_to_holiday"] = date_series.apply(days_to_holiday)
+        # Days since last holiday (backward-looking)
+        if self.extract_days_from:
+            def days_from_holiday(date):
+                if pd.isna(date):
+                    return np.nan
+                
+                past_holidays = [h for h in holiday_dates if h < date.date()]
+                
+                if past_holidays:
+                    return (date.date() - past_holidays[-1]).days
+                return np.nan
+            
+            out[f"{self.column}_days_from_holiday"] = date_series.apply(days_from_holiday)
         
         self.feature_names_ = list(out.columns)
         return out

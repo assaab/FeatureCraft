@@ -39,53 +39,216 @@ class NumericConverter(BaseEstimator, TransformerMixin):
 
 
 class DateTimeFeatures(BaseEstimator, TransformerMixin):
-    """Extract datetime features."""
+    """Extract comprehensive datetime features with configurable feature groups.
+    
+    Feature Categories:
+    - Basic Extraction: year, month, day, hour, minute, second, day_of_week, week_of_year, quarter, day_of_year
+    - Cyclical Encoding: sin/cos transforms for month, day_of_week, hour, day_of_year (preserves cyclical patterns)
+    - Boolean Flags: is_weekend, is_month_start, is_month_end, is_quarter_start, is_quarter_end, is_year_start, is_year_end
+    - Seasonality: season (0=winter, 1=spring, 2=summer, 3=fall)
+    - Business Logic: is_business_hour (9am-5pm weekdays), business_days_in_month
+    - Relative Time: days_since_reference (requires reference_date parameter)
+    """
 
-    def __init__(self, columns: Sequence[str]) -> None:
-        """Initialize with column names."""
+    def __init__(
+        self, 
+        columns: Sequence[str],
+        extract_basic: bool = True,
+        extract_cyclical: bool = True,
+        extract_boolean_flags: bool = True,
+        extract_season: bool = True,
+        extract_business: bool = True,
+        extract_relative: bool = False,
+        reference_date: pd.Timestamp | str | None = None,
+        business_hour_start: int = 9,
+        business_hour_end: int = 17,
+    ) -> None:
+        """Initialize datetime feature extractor.
+        
+        Args:
+            columns: Column names to extract features from
+            extract_basic: Extract year, month, day, hour, minute, second, etc.
+            extract_cyclical: Extract sin/cos cyclical encodings
+            extract_boolean_flags: Extract boolean flags (weekend, month_start, etc.)
+            extract_season: Extract season feature
+            extract_business: Extract business hour/day features
+            extract_relative: Extract relative time features (requires reference_date)
+            reference_date: Reference date for relative time features
+            business_hour_start: Start hour for business hours (default 9am)
+            business_hour_end: End hour for business hours (default 5pm)
+        """
         # Store columns as-is for sklearn compatibility
         self.columns = columns
+        self.extract_basic = extract_basic
+        self.extract_cyclical = extract_cyclical
+        self.extract_boolean_flags = extract_boolean_flags
+        self.extract_season = extract_season
+        self.extract_business = extract_business
+        self.extract_relative = extract_relative
+        self.reference_date = pd.to_datetime(reference_date) if reference_date else None
+        self.business_hour_start = business_hour_start
+        self.business_hour_end = business_hour_end
         self.out_columns_: list[str] = []
+        self.has_time_component_: dict[str, bool] = {}
 
-    def fit(self, X: pd.DataFrame, y=None) -> DateTimeFeatures:
-        """Fit transformer."""
+    def fit(self, X: pd.DataFrame, y=None) -> "DateTimeFeatures":
+        """Fit transformer - detect if columns have time components."""
+        df = pd.DataFrame(X)
+        cols = list(self.columns) if not isinstance(self.columns, list) else self.columns
+        
+        for c in cols:
+            if c in df.columns:
+                s = pd.to_datetime(df[c], errors="coerce")
+                # Check if time component exists (hour/minute/second are not all zeros)
+                has_time = (
+                    s.dt.hour.notna().any() and 
+                    (s.dt.hour != 0).any() or 
+                    (s.dt.minute != 0).any() or 
+                    (s.dt.second != 0).any()
+                )
+                self.has_time_component_[c] = has_time
+        
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Transform by extracting datetime features."""
+        """Transform by extracting comprehensive datetime features."""
         df = pd.DataFrame(X).copy()
         out = pd.DataFrame(index=df.index)
+        
         # Convert to list for iteration
         cols = list(self.columns) if not isinstance(self.columns, list) else self.columns
+        
         for c in cols:
             s = pd.to_datetime(df[c], errors="coerce")
-            out[f"{c}_year"] = s.dt.year
-            out[f"{c}_quarter"] = s.dt.quarter
-            out[f"{c}_month"] = s.dt.month
-            out[f"{c}_weekday"] = s.dt.weekday
-            # Only extract hour if time component exists
-            if s.dt.hour.notna().any():
-                out[f"{c}_hour"] = s.dt.hour
-            out[f"{c}_is_weekend"] = s.dt.weekday.isin([5, 6]).astype(int)
-            # cyclic
-            out[f"{c}_month_sin"] = np.sin(2 * np.pi * (s.dt.month.fillna(0) / 12))
-            out[f"{c}_month_cos"] = np.cos(2 * np.pi * (s.dt.month.fillna(0) / 12))
-            out[f"{c}_weekday_sin"] = np.sin(2 * np.pi * (s.dt.weekday.fillna(0) / 7))
-            out[f"{c}_weekday_cos"] = np.cos(2 * np.pi * (s.dt.weekday.fillna(0) / 7))
-            if s.dt.hour.notna().any():
-                out[f"{c}_hour_sin"] = np.sin(2 * np.pi * (s.dt.hour.fillna(0) / 24))
-                out[f"{c}_hour_cos"] = np.cos(2 * np.pi * (s.dt.hour.fillna(0) / 24))
+            has_time = self.has_time_component_.get(c, False)
+            
+            # ========== BASIC EXTRACTION ==========
+            if self.extract_basic:
+                out[f"{c}_year"] = s.dt.year
+                out[f"{c}_month"] = s.dt.month
+                out[f"{c}_day"] = s.dt.day
+                out[f"{c}_day_of_week"] = s.dt.dayofweek  # Monday=0, Sunday=6
+                out[f"{c}_day_of_year"] = s.dt.dayofyear
+                out[f"{c}_week_of_year"] = s.dt.isocalendar().week
+                out[f"{c}_quarter"] = s.dt.quarter
+                
+                # Only extract time components if they exist
+                if has_time:
+                    out[f"{c}_hour"] = s.dt.hour
+                    out[f"{c}_minute"] = s.dt.minute
+                    out[f"{c}_second"] = s.dt.second
+            
+            # ========== CYCLICAL ENCODING ==========
+            if self.extract_cyclical:
+                # Month (12 months)
+                out[f"{c}_month_sin"] = np.sin(2 * np.pi * (s.dt.month.fillna(0) / 12))
+                out[f"{c}_month_cos"] = np.cos(2 * np.pi * (s.dt.month.fillna(0) / 12))
+                
+                # Day of week (7 days)
+                out[f"{c}_day_of_week_sin"] = np.sin(2 * np.pi * (s.dt.dayofweek.fillna(0) / 7))
+                out[f"{c}_day_of_week_cos"] = np.cos(2 * np.pi * (s.dt.dayofweek.fillna(0) / 7))
+                
+                # Day of year (365 days)
+                out[f"{c}_day_of_year_sin"] = np.sin(2 * np.pi * (s.dt.dayofyear.fillna(0) / 365.25))
+                out[f"{c}_day_of_year_cos"] = np.cos(2 * np.pi * (s.dt.dayofyear.fillna(0) / 365.25))
+                
+                # Hour (24 hours) - only if time component exists
+                if has_time:
+                    out[f"{c}_hour_sin"] = np.sin(2 * np.pi * (s.dt.hour.fillna(0) / 24))
+                    out[f"{c}_hour_cos"] = np.cos(2 * np.pi * (s.dt.hour.fillna(0) / 24))
+            
+            # ========== BOOLEAN FLAGS ==========
+            if self.extract_boolean_flags:
+                # Weekend
+                out[f"{c}_is_weekend"] = s.dt.dayofweek.isin([5, 6]).astype(int)
+                
+                # Month boundaries
+                out[f"{c}_is_month_start"] = s.dt.is_month_start.astype(int)
+                out[f"{c}_is_month_end"] = s.dt.is_month_end.astype(int)
+                
+                # Quarter boundaries
+                out[f"{c}_is_quarter_start"] = s.dt.is_quarter_start.astype(int)
+                out[f"{c}_is_quarter_end"] = s.dt.is_quarter_end.astype(int)
+                
+                # Year boundaries
+                out[f"{c}_is_year_start"] = s.dt.is_year_start.astype(int)
+                out[f"{c}_is_year_end"] = s.dt.is_year_end.astype(int)
+            
+            # ========== SEASONALITY ==========
+            if self.extract_season:
+                # Northern hemisphere seasons (can be customized)
+                # 0=Winter (Dec-Feb), 1=Spring (Mar-May), 2=Summer (Jun-Aug), 3=Fall (Sep-Nov)
+                month = s.dt.month
+                season = pd.Series(np.nan, index=s.index)
+                season[month.isin([12, 1, 2])] = 0  # Winter
+                season[month.isin([3, 4, 5])] = 1   # Spring
+                season[month.isin([6, 7, 8])] = 2   # Summer
+                season[month.isin([9, 10, 11])] = 3 # Fall
+                out[f"{c}_season"] = season
+            
+            # ========== BUSINESS LOGIC ==========
+            if self.extract_business:
+                # Business hour (9am-5pm on weekdays by default)
+                if has_time:
+                    is_business_hour = (
+                        (s.dt.dayofweek < 5) &  # Monday-Friday
+                        (s.dt.hour >= self.business_hour_start) & 
+                        (s.dt.hour < self.business_hour_end)
+                    )
+                    out[f"{c}_is_business_hour"] = is_business_hour.astype(int)
+                
+                # Business days in month
+                # Using a vectorized approach for efficiency
+                business_days_in_month = s.apply(
+                    lambda x: np.busday_count(
+                        x.replace(day=1).date(),
+                        (x.replace(day=1) + pd.DateOffset(months=1)).date()
+                    ) if pd.notna(x) else np.nan
+                )
+                out[f"{c}_business_days_in_month"] = business_days_in_month
+            
+            # ========== RELATIVE TIME ==========
+            if self.extract_relative and self.reference_date is not None:
+                # Days since reference date
+                days_since = (s - self.reference_date).dt.days
+                out[f"{c}_days_since_reference"] = days_since
+                
+                # Additional relative features
+                out[f"{c}_weeks_since_reference"] = days_since / 7
+                out[f"{c}_months_since_reference"] = (
+                    (s.dt.year - self.reference_date.year) * 12 + 
+                    (s.dt.month - self.reference_date.month)
+                )
+        
         # Store output columns for feature name inference (must be done after all features created)
         if not self.out_columns_:  # Only set on first transform (fit_transform)
             self.out_columns_ = list(out.columns)
+        
         return out
 
     def get_feature_names_out(self, input_features=None):
         """Get output feature names."""
         if self.out_columns_:
             return self.out_columns_
-        # Fallback if transform hasn't been called yet
-        return [f"dt_feat_{i}" for i in range(len(self.columns) * 11)]  # max possible features per column
+        
+        # Estimate based on enabled features (conservative estimate)
+        cols = list(self.columns) if not isinstance(self.columns, list) else self.columns
+        features_per_col = 0
+        
+        if self.extract_basic:
+            features_per_col += 10  # year, month, day, day_of_week, day_of_year, week_of_year, quarter, hour, minute, second
+        if self.extract_cyclical:
+            features_per_col += 8   # month_sin/cos, day_of_week_sin/cos, day_of_year_sin/cos, hour_sin/cos
+        if self.extract_boolean_flags:
+            features_per_col += 7   # is_weekend, is_month_start/end, is_quarter_start/end, is_year_start/end
+        if self.extract_season:
+            features_per_col += 1   # season
+        if self.extract_business:
+            features_per_col += 2   # is_business_hour, business_days_in_month
+        if self.extract_relative:
+            features_per_col += 3   # days/weeks/months since reference
+        
+        return [f"dt_feat_{i}" for i in range(len(cols) * features_per_col)]
 
 
 class SkewedPowerTransformer(BaseEstimator, TransformerMixin):
