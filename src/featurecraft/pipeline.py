@@ -56,6 +56,12 @@ from .transformers import (
     BinningTransformer,
     AutoBinningSelector,
 )
+from .clustering import (
+    ClusteringFeatureExtractor,
+    AdaptiveClusteringExtractor,
+    MultiMethodClusteringExtractor,
+    build_clustering_pipeline,
+)
 from .types import DatasetInsights, PipelineSummary, TaskType
 from .validators import validate_input_frame
 from .exceptions import PipelineNotFittedError, SecurityError, InputValidationError, ExportError
@@ -949,6 +955,174 @@ class AutoFeatureEngineer:
             )
             
             steps_num.append(("binning", binning_transformer))
+        
+        # Optional clustering-based feature extraction
+        # Extract unsupervised features from numeric data using clustering algorithms
+        if cfg.clustering_enabled and num_cols:
+            # Build clustering transformer based on method
+            if cfg.clustering_method == "auto":
+                # Adaptive clustering: automatically select optimal method and parameters
+                clustering_transformer = AdaptiveClusteringExtractor(
+                    columns=cfg.clustering_columns or num_cols,
+                    prefer_method='auto',
+                    max_clusters=cfg.clustering_max_clusters,
+                    optimize_k=cfg.clustering_optimize_k,
+                    k_selection_method=cfg.clustering_k_selection_method,
+                    scale_features=cfg.clustering_scale_features,
+                    random_state=cfg.random_state,
+                )
+                method_desc = "Adaptive (auto-select optimal method)"
+            
+            elif cfg.clustering_method == "multi":
+                # Multi-method ensemble: combine multiple clustering algorithms
+                clustering_transformer = MultiMethodClusteringExtractor(
+                    columns=cfg.clustering_columns or num_cols,
+                    methods=cfg.clustering_multi_methods,
+                    n_clusters_kmeans=cfg.clustering_n_clusters,
+                    n_clusters_gmm=cfg.clustering_n_clusters,
+                    n_clusters_hierarchical=cfg.clustering_n_clusters,
+                    dbscan_eps=cfg.clustering_dbscan_eps,
+                    dbscan_min_samples=cfg.clustering_dbscan_min_samples,
+                    scale_features=cfg.clustering_scale_features,
+                    extract_cluster_id=cfg.clustering_extract_cluster_id,
+                    extract_distance=cfg.clustering_extract_distance,
+                    extract_probabilities=cfg.clustering_extract_probabilities,
+                    random_state=cfg.random_state,
+                )
+                method_desc = f"Multi-method ensemble ({', '.join(cfg.clustering_multi_methods)})"
+            
+            else:
+                # Single clustering method
+                clustering_transformer = ClusteringFeatureExtractor(
+                    columns=cfg.clustering_columns or num_cols,
+                    method=cfg.clustering_method,
+                    n_clusters=cfg.clustering_n_clusters,
+                    extract_cluster_id=cfg.clustering_extract_cluster_id,
+                    extract_distance=cfg.clustering_extract_distance,
+                    extract_probabilities=cfg.clustering_extract_probabilities,
+                    extract_outlier_flag=cfg.clustering_extract_outlier_flag,
+                    scale_features=cfg.clustering_scale_features,
+                    kmeans_init=cfg.clustering_kmeans_init,
+                    kmeans_max_iter=cfg.clustering_kmeans_max_iter,
+                    kmeans_n_init=cfg.clustering_kmeans_n_init,
+                    dbscan_eps=cfg.clustering_dbscan_eps,
+                    dbscan_min_samples=cfg.clustering_dbscan_min_samples,
+                    dbscan_metric=cfg.clustering_dbscan_metric,
+                    gmm_covariance_type=cfg.clustering_gmm_covariance_type,
+                    gmm_max_iter=cfg.clustering_gmm_max_iter,
+                    gmm_n_init=cfg.clustering_gmm_n_init,
+                    hierarchical_linkage=cfg.clustering_hierarchical_linkage,
+                    hierarchical_distance_threshold=cfg.clustering_hierarchical_distance_threshold,
+                    random_state=cfg.random_state,
+                )
+                method_desc = cfg.clustering_method.upper()
+            
+            # Fit clustering to determine actual features generated
+            clustering_transformer.fit(X[num_cols], y)
+            
+            # Get feature names for explanation
+            cluster_feature_names = clustering_transformer.get_feature_names_out()
+            n_cluster_features = len(cluster_feature_names)
+            
+            # Build explanation based on method
+            clustering_cols = cfg.clustering_columns or num_cols
+            
+            if cfg.clustering_method == "auto":
+                # For adaptive clustering, get the selected method
+                selected_method = clustering_transformer.selected_method_
+                n_clusters = clustering_transformer.n_clusters_
+                
+                reason = (
+                    f"Applying adaptive clustering to {len(clustering_cols)} numeric features. "
+                    f"Automatically selected {selected_method.upper()} with {n_clusters} clusters "
+                    f"based on data characteristics. Generated {n_cluster_features} cluster-based features "
+                    f"including cluster IDs, distances to centroids, and probabilities. "
+                    "Clustering captures complex patterns and group structures that may not be obvious from raw features."
+                )
+                
+                details = {
+                    "selected_method": selected_method,
+                    "n_clusters": n_clusters,
+                    "n_features_generated": n_cluster_features,
+                    "optimize_k": cfg.clustering_optimize_k,
+                    "k_selection_method": cfg.clustering_k_selection_method,
+                }
+            
+            elif cfg.clustering_method == "multi":
+                reason = (
+                    f"Applying multi-method clustering ensemble to {len(clustering_cols)} numeric features. "
+                    f"Using {len(cfg.clustering_multi_methods)} methods ({', '.join(cfg.clustering_multi_methods)}) "
+                    f"to capture different clustering perspectives. Generated {n_cluster_features} features from all methods. "
+                    "Ensemble clustering provides robust feature extraction by combining complementary algorithms."
+                )
+                
+                details = {
+                    "methods": cfg.clustering_multi_methods,
+                    "n_features_generated": n_cluster_features,
+                    "n_clusters_per_method": cfg.clustering_n_clusters,
+                }
+            
+            else:
+                # Single method explanation with method-specific details
+                method_descriptions = {
+                    "kmeans": (
+                        f"K-Means clustering with {cfg.clustering_n_clusters} clusters. "
+                        "Fast, scalable clustering for spherical clusters. Good for customer segmentation."
+                    ),
+                    "dbscan": (
+                        f"DBSCAN clustering (eps={cfg.clustering_dbscan_eps}, min_samples={cfg.clustering_dbscan_min_samples}). "
+                        "Density-based clustering for arbitrary shapes and automatic outlier detection."
+                    ),
+                    "gmm": (
+                        f"Gaussian Mixture Model with {cfg.clustering_n_clusters} components. "
+                        "Probabilistic clustering with soft assignments for overlapping groups."
+                    ),
+                    "hierarchical": (
+                        f"Hierarchical clustering with {cfg.clustering_n_clusters} clusters "
+                        f"(linkage={cfg.clustering_hierarchical_linkage}). Tree-based clustering for nested group structures."
+                    ),
+                }
+                
+                reason = (
+                    f"Applying {method_desc} to {len(clustering_cols)} numeric features. "
+                    f"{method_descriptions.get(cfg.clustering_method, 'Clustering-based feature extraction.')} "
+                    f"Generated {n_cluster_features} features including cluster membership, "
+                    f"distances to centroids{', probabilities' if cfg.clustering_extract_probabilities else ''}"
+                    f"{', and outlier flags' if cfg.clustering_extract_outlier_flag else ''}."
+                )
+                
+                details = {
+                    "method": cfg.clustering_method,
+                    "n_clusters": cfg.clustering_n_clusters,
+                    "n_features_generated": n_cluster_features,
+                    "extract_cluster_id": cfg.clustering_extract_cluster_id,
+                    "extract_distance": cfg.clustering_extract_distance,
+                    "extract_probabilities": cfg.clustering_extract_probabilities,
+                    "extract_outlier_flag": cfg.clustering_extract_outlier_flag,
+                }
+            
+            # Explain clustering transformation
+            self.explainer_.explain_transformation(
+                transform_name=f"Clustering-Based Features ({method_desc})",
+                columns=clustering_cols,
+                reason=reason,
+                details=details,
+                config_params={
+                    "clustering_enabled": cfg.clustering_enabled,
+                    "clustering_method": cfg.clustering_method,
+                    "clustering_n_clusters": cfg.clustering_n_clusters,
+                    "clustering_scale_features": cfg.clustering_scale_features,
+                    "clustering_optimize_k": cfg.clustering_optimize_k,
+                },
+                recommendation=(
+                    "Clustering features are especially useful for: (1) Discovering hidden segments in customer/user data, "
+                    "(2) Anomaly/outlier detection (DBSCAN), (3) Creating interaction features (cluster × numeric), "
+                    "(4) Improving model performance by adding non-linear patterns. "
+                    "Consider combining with feature interactions for maximum benefit."
+                ),
+            )
+            
+            steps_num.append(("clustering", clustering_transformer))
         
         # Mathematical transforms: Use new MathematicalTransformer with intelligent auto-selection
         # This replaces the old SkewedPowerTransformer with more comprehensive transform options

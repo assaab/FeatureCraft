@@ -452,6 +452,116 @@ class FeatureCraftConfig(BaseModel):
         description="Subsample size for expensive binning methods (kmeans, decision_tree)"
     )
 
+    # ========== Clustering-Based Features ==========
+    clustering_enabled: bool = Field(
+        default=False,
+        description="Enable clustering-based feature extraction"
+    )
+    clustering_method: str = Field(
+        default="auto",
+        description="Clustering method: auto (adaptive), kmeans, dbscan, gmm, hierarchical, multi (ensemble)"
+    )
+    clustering_n_clusters: int = Field(
+        default=5, ge=2, le=20,
+        description="Number of clusters for K-Means, GMM, and Hierarchical"
+    )
+    clustering_columns: Optional[List[str]] = Field(
+        default=None,
+        description="Specific columns to use for clustering (None = all numeric)"
+    )
+    clustering_extract_cluster_id: bool = Field(
+        default=True,
+        description="Extract cluster membership ID as a feature"
+    )
+    clustering_extract_distance: bool = Field(
+        default=True,
+        description="Extract distance to cluster centroid(s)"
+    )
+    clustering_extract_probabilities: bool = Field(
+        default=True,
+        description="Extract cluster probabilities for GMM (soft assignments)"
+    )
+    clustering_extract_outlier_flag: bool = Field(
+        default=True,
+        description="Extract outlier flag for DBSCAN"
+    )
+    clustering_scale_features: bool = Field(
+        default=True,
+        description="Standardize features before clustering"
+    )
+    
+    # K-Means Parameters
+    clustering_kmeans_init: str = Field(
+        default="k-means++",
+        description="K-Means initialization: k-means++, random"
+    )
+    clustering_kmeans_max_iter: int = Field(
+        default=300, ge=10, le=1000,
+        description="Maximum iterations for K-Means"
+    )
+    clustering_kmeans_n_init: int = Field(
+        default=10, ge=1, le=50,
+        description="Number of K-Means initializations"
+    )
+    
+    # DBSCAN Parameters
+    clustering_dbscan_eps: float = Field(
+        default=0.5, ge=0.01, le=10.0,
+        description="DBSCAN epsilon (maximum distance for neighborhood)"
+    )
+    clustering_dbscan_min_samples: int = Field(
+        default=5, ge=2, le=100,
+        description="DBSCAN minimum samples for core point"
+    )
+    clustering_dbscan_metric: str = Field(
+        default="euclidean",
+        description="DBSCAN distance metric: euclidean, manhattan, cosine"
+    )
+    
+    # Gaussian Mixture Parameters
+    clustering_gmm_covariance_type: str = Field(
+        default="full",
+        description="GMM covariance type: full, tied, diag, spherical"
+    )
+    clustering_gmm_max_iter: int = Field(
+        default=100, ge=10, le=500,
+        description="Maximum EM iterations for GMM"
+    )
+    clustering_gmm_n_init: int = Field(
+        default=1, ge=1, le=10,
+        description="Number of GMM initializations"
+    )
+    
+    # Hierarchical Parameters
+    clustering_hierarchical_linkage: str = Field(
+        default="ward",
+        description="Hierarchical linkage: ward, complete, average, single"
+    )
+    clustering_hierarchical_distance_threshold: Optional[float] = Field(
+        default=None, ge=0.0,
+        description="Distance threshold for automatic cluster count (None = use n_clusters)"
+    )
+    
+    # Adaptive Clustering Parameters
+    clustering_optimize_k: bool = Field(
+        default=True,
+        description="Automatically optimize number of clusters (for auto/adaptive mode)"
+    )
+    clustering_k_selection_method: str = Field(
+        default="silhouette",
+        description="Method for selecting optimal K: silhouette, elbow, bic"
+    )
+    clustering_max_clusters: int = Field(
+        default=10, ge=2, le=50,
+        description="Maximum number of clusters to try when optimizing K"
+    )
+    
+    # Multi-Method Parameters
+    clustering_multi_methods: List[str] = Field(
+        default_factory=lambda: ["kmeans", "gmm"],
+        description="Methods to use in multi-method ensemble: kmeans, dbscan, gmm, hierarchical"
+    )
+
     # ========== Feature Interactions ==========
     interactions_enabled: bool = Field(
         default=False,

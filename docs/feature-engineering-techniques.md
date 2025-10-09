@@ -20,31 +20,91 @@ This document provides a comprehensive overview of all feature engineering techn
 
 | Technique | Method | Use Case | Library |
 |-----------|--------|----------|---------|
-| **Text Statistics** | `TextStatisticsExtractor` | Basic text metrics (char count, word count, etc.) | Custom |
-| **Bag-of-Words** | `CountVectorizer` | Document classification | scikit-learn |
-| **TF-IDF** | `TfidfVectorizer` | Keyword extraction | scikit-learn |
-| **N-grams** | `CountVectorizer` (1,2) or (1,3) | Capture phrases | scikit-learn |
-| **Hashing Vectorization** | `HashingVectorizer` | High-dimensional text data | scikit-learn |
-| **Named Entity Recognition** | `NERFeatureExtractor` | Extract entities (persons, orgs, locations) | spaCy |
+| **Text Statistics** | `TextStatisticsExtractor` | Character/word counts, sentence analysis | Custom |
+| **Sentiment Analysis** | `SentimentAnalyzer` | Polarity and subjectivity scores | TextBlob/VADER |
+| **Named Entity Recognition** | `NERFeatureExtractor` | Extract entities (persons, organizations, locations) | spaCy |
+| **Topic Modeling** | `TopicModelingFeatures` | Latent Dirichlet Allocation topic distributions | scikit-learn |
 | **Readability Scores** | `ReadabilityScoreExtractor` | Text complexity (Flesch-Kincaid, SMOG) | textstat |
-| **Sentiment Analysis** | Polarity scoring | Opinion mining | TextBlob |
-| **Topic Modeling** | `LatentDirichletAllocation` | Document clustering | scikit-learn |
-| **Text Dimensionality Reduction** | `TruncatedSVD` | Reduce text feature dimensions | scikit-learn |
+| **Text Preprocessing** | `TextPreprocessor` | Cleaning, normalization, tokenization | Custom |
+| **Text Vectorization** | TF-IDF, CountVectorizer | Feature extraction for ML | scikit-learn |
+
+**Note**: Text processing features are now available in the main FeatureCraft API and can be used directly: `from featurecraft import SentimentAnalyzer, NERFeatureExtractor, TopicModelingFeatures`
 
 ## 🔢 Mathematical Transformations
 
 | Technique | Method | Use Case | Library |
 |-----------|--------|----------|---------|
 | **Numeric Conversion** | `NumericConverter` | Mixed type column conversion | Custom |
-| **Power Transformation** | `SkewedPowerTransformer` | Handle skewed distributions | Custom |
+| **Power Transformation** | `SkewedPowerTransformer` | Handle skewed distributions with Yeo-Johnson | Custom |
 | **Log Transformation** | `LogTransformer` | Normalize right-skewed data | Custom |
-| **Log1p Transformation** | `Log1pTransformer` | Stabilize variance for small values | Custom |
+| **Log1p Transformation** | `Log1pTransformer` | Stabilize variance for small values (log(x+1)) | Custom |
 | **Square Root Transformation** | `SqrtTransformer` | Moderate skewness reduction | Custom |
-| **Reciprocal Transformation** | `ReciprocalTransformer` | Handle inverse relationships | Custom |
-| **Box-Cox Transformation** | `BoxCoxTransformer` | Normalize distributions | Custom |
+| **Reciprocal Transformation** | `ReciprocalTransformer` | Handle inverse relationships (1/x) | Custom |
+| **Box-Cox Transformation** | `BoxCoxTransformer` | Normalize distributions for positive data | Custom |
 | **Exponential Transformation** | `ExponentialTransformer` | Create polynomial features | Custom |
 | **Yeo-Johnson Transformation** | `YeoJohnsonWrapper` | Normalize non-positive data | Custom |
-| **Mathematical Combinations** | `MathematicalTransformer` | Intelligent auto-selection | Custom |
+| **Intelligent Auto-Selection** | `MathematicalTransformer` | Automatically select optimal transform per column | Custom |
+
+## 🧮 Statistical Features
+
+| Technique | Method | Use Case | Library |
+|-----------|--------|----------|---------|
+| **Row-wise Statistics** | `RowStatisticsTransformer` | Cross-feature aggregations (mean, std, min, max per row) | Custom |
+| **Percentile Ranking** | `PercentileRankTransformer` | Within-column percentile ranking | Custom |
+| **Z-Score Standardization** | `ZScoreTransformer` | Standardized scores across features | Custom |
+| **Outlier Detection** | `OutlierDetector` | IQR and Z-score based outlier flagging | Custom |
+| **Quantile-based Features** | `QuantileTransformer` | Quantile-based transformations | Custom |
+| **Target-based Features** | `TargetBasedFeaturesTransformer` | Statistical relationships with target variable | Custom |
+| **Missing Value Patterns** | `MissingValuePatternsTransformer` | Analyze missing value patterns across features | Custom |
+
+## 🏭 Clustering-based Features
+
+| Technique | Method | Use Case | Library |
+|-----------|--------|----------|---------|
+| **K-Means Clustering** | `ClusteringFeatureExtractor` | Cluster membership and distances | scikit-learn |
+| **DBSCAN Clustering** | `ClusteringFeatureExtractor` | Density-based clustering with outlier detection | scikit-learn |
+| **Gaussian Mixture** | `ClusteringFeatureExtractor` | Probabilistic clustering with soft assignments | scikit-learn |
+| **Hierarchical Clustering** | `ClusteringFeatureExtractor` | Tree-based clustering for nested structures | scikit-learn |
+| **Multi-Method Clustering** | `MultiMethodClusteringExtractor` | Ensemble clustering from multiple algorithms | Custom |
+| **Adaptive Clustering** | `AdaptiveClusteringExtractor` | Auto-select optimal clustering method and parameters | Custom |
+
+## 🌍 Domain-Specific Features
+
+### Finance & Trading
+| Technique | Method | Use Case | Library |
+|-----------|--------|----------|---------|
+| **Technical Indicators** | `FinanceTechnicalIndicators` | RSI, MACD, Bollinger Bands, Moving Averages | Custom |
+| **Risk Ratios** | `FinanceRiskRatios` | Sharpe ratio, Sortino ratio, Maximum drawdown | Custom |
+| **Volatility Measures** | `FinanceVolatility` | Historical volatility, Beta calculations | Custom |
+
+### E-commerce & Retail
+| Technique | Method | Use Case | Library |
+|-----------|--------|----------|---------|
+| **RFM Analysis** | `EcommerceRFM` | Recency, Frequency, Monetary customer analysis | Custom |
+| **Customer Segmentation** | `EcommerceRFM` | RFM-based customer segments (Champion, Loyal, etc.) | Custom |
+| **Purchase Patterns** | Transaction analysis | Purchase timing and value patterns | Custom |
+
+### Healthcare & Medical
+| Technique | Method | Use Case | Library |
+|-----------|--------|----------|---------|
+| **Vital Sign Ratios** | `HealthcareVitals` | BMI, blood pressure ratios, heart rate variability | Custom |
+| **Clinical Scores** | `ClinicalScores` | APACHE, SOFA, Charlson comorbidity scores | Custom |
+| **Medical Measurements** | `MedicalMeasurements` | Laboratory value interpretations | Custom |
+
+### Natural Language Processing
+| Technique | Method | Use Case | Library |
+|-----------|--------|----------|---------|
+| **Text Statistics** | `NLPTextStats` | Character/word counts, readability scores | Custom |
+| **Part-of-Speech Features** | `NLPPoSFeatures` | Grammatical feature extraction | spaCy/NLTK |
+| **Sentiment Analysis** | `NLPSentiment` | Polarity and emotion detection | TextBlob/NLTK |
+
+### Geospatial Features
+| Technique | Method | Use Case | Library |
+|-----------|--------|----------|---------|
+| **Distance Calculations** | `GeospatialFeatures` | Haversine distance between coordinates | Custom |
+| **Proximity Features** | `GeospatialFeatures` | Distance to points of interest (POIs) | Custom |
+| **Coordinate Transformations** | `GeospatialFeatures` | Lat/lon to radians, cartesian coordinates | Custom |
+| **Spatial Binning** | `GeospatialFeatures` | Geohash-like spatial discretization | Custom |
 
 ## ⚡ Feature Interactions
 
@@ -60,22 +120,33 @@ This document provides a comprehensive overview of all feature engineering techn
 
 | Technique | Method | Use Case | Library |
 |-----------|--------|----------|---------|
-| **Lag Features** | `make_lags` | Temporal dependencies | Custom |
-| **Rolling Statistics** | `make_rolling` | Moving averages and statistics | Custom |
-| **Datetime Feature Extraction** | `DateTimeFeatures` | Comprehensive date/time components | Custom |
-| **Cyclical Encoding** | Sin/Cos transforms | Periodic patterns | Custom |
-| **Seasonality Features** | Season extraction | Seasonal patterns | Custom |
-| **Business Logic Features** | Business hour/day detection | Business context | Custom |
-| **Relative Time Features** | Days since reference | Temporal relationships | Custom |
+| **Lag Features** | `LagFeaturesTransformer` | Temporal dependencies | Custom |
+| **Rolling Statistics** | `RollingWindowTransformer` | Moving averages and statistics | Custom |
+| **Expanding Statistics** | `ExpandingWindowTransformer` | Cumulative statistics over time | Custom |
+| **Datetime Feature Extraction** | `DateTimeFeatures` | Year, month, day, hour, minute, second, etc. | Custom |
+| **Cyclical Encoding** | `DateTimeFeatures` | Sin/cos transforms for periodic patterns | Custom |
+| **Seasonality Features** | `DateTimeFeatures` | Season extraction (winter/spring/summer/fall) | Custom |
+| **Business Logic Features** | `DateTimeFeatures` | Business hours, weekends, month/quarter boundaries | Custom |
+| **Relative Time Features** | `DateTimeFeatures` | Days since reference date | Custom |
+| **Rank-based Features** | `RankFeaturesTransformer` | Temporal ranking and ordering | Custom |
 
 ## 🎯 Feature Selection Techniques
 
 | Technique | Method | Use Case | Library |
 |-----------|--------|----------|---------|
 | **Mutual Information Selection** | `MutualInfoSelector` | Non-linear feature relationships | scikit-learn |
+| **Chi-Square Selection** | `Chi2Selector` | Statistical significance for categorical targets | scikit-learn |
+| **Lasso Selection** | `LassoSelector` | L1-regularized feature selection | scikit-learn |
+| **Recursive Feature Elimination** | `RFESelector` | Recursive feature elimination with estimator | scikit-learn |
+| **Sequential Selection** | `SequentialFeatureSelector` | Forward/backward feature selection | mlxtend |
+| **Tree-based Selection** | `TreeImportanceSelector` | Feature importance from tree models | Custom |
+| **Boruta Algorithm** | `BorutaSelector` | Statistical significance testing | boruta |
+| **WOE/IV Selection** | `WOEIVSelector` | Weight of Evidence/Information Value | Custom |
 | **Correlation-based Pruning** | `prune_correlated` | Remove highly correlated features | Custom |
 | **Variance Inflation Factor** | `compute_vif_drop` | Detect multicollinearity | Custom |
 | **Dimensionality Reduction** | `DimensionalityReducer` | Reduce feature space | Custom |
+| **Multi-Method Reduction** | `MultiMethodDimensionalityReducer` | Ensemble dimensionality reduction | Custom |
+| **Adaptive Reduction** | `AdaptiveDimensionalityReducer` | Auto-select optimal reduction method | Custom |
 
 ## 🔧 Imputation Techniques
 
@@ -103,16 +174,19 @@ This document provides a comprehensive overview of all feature engineering techn
 | **AI Feature Advisor** | `AIFeatureAdvisor` | LLM-driven strategy recommendations | Custom (OpenAI/Anthropic) |
 | **Feature Engineering Planner** | `FeatureEngineeringPlanner` | Orchestrated pipeline planning | Custom |
 | **Adaptive Configuration** | `AdaptiveConfigOptimizer` | Learning from performance feedback | Custom |
+| **Pipeline Explanation** | `PipelineExplainer` | Explain feature engineering decisions | Custom |
+| **Transformation Explanation** | `TransformationExplanation` | Explain individual transformations | Custom |
+| **Decision Categories** | `DecisionCategory` | Categorize feature engineering decisions | Custom |
 
 ## 🏗️ Advanced Techniques
 
 ### Binning/Discretization
 - **Multiple Strategies**: `BinningTransformer`
-  - Equal width binning
-  - Equal frequency binning
-  - K-means clustering binning
-  - Decision tree binning
-  - Quantile-based binning
+  - Equal width binning (uniform intervals)
+  - Equal frequency binning (quantile-based)
+  - K-means clustering binning (data-driven boundaries)
+  - Decision tree binning (supervised, target-aware)
+  - Custom binning (user-defined edges)
 
 ### Outlier Handling
 - **Winsorization**: `WinsorizerTransformer`
@@ -124,6 +198,12 @@ This document provides a comprehensive overview of all feature engineering techn
 - **Missing value handling**: `CategoricalMissingIndicator`
 - **String standardization**: Built-in cleaning functions
 
+### Pipeline Integration Features
+- **Auto Feature Engineer**: `AutoFeatureEngineer` - End-to-end automated pipeline
+- **Report Builder**: `ReportBuilder` - Generate comprehensive feature reports
+- **Configuration Management**: `FeatureCraftConfig` - Pipeline configuration
+- **Pipeline Export**: Export trained pipelines for production use
+
 ## 📈 Pipeline Integration
 
 All techniques are designed to work seamlessly with:
@@ -131,36 +211,56 @@ All techniques are designed to work seamlessly with:
 - **Feature unions for parallel processing**
 - **Automatic hyperparameter tuning**
 - **Cross-validation compatibility**
+- **Production deployment** (pipeline export functionality)
+- **Explainability integration** (built-in explanations)
+- **Configuration management** (centralized settings)
+- **Performance monitoring** (drift detection and reporting)
 
 ## 🔍 Technique Selection Logic
 
 FeatureCraft automatically selects appropriate techniques based on:
 
 1. **Data Characteristics**:
-   - Column types (numeric, categorical, text, datetime)
-   - Missing value patterns
-   - Cardinality levels
-   - Distribution shapes
+   - Column types (numeric, categorical, text, datetime, geospatial)
+   - Missing value patterns and data quality
+   - Cardinality levels and feature distributions
+   - Domain context (finance, healthcare, e-commerce, etc.)
+   - Temporal patterns and seasonality
+   - Text complexity and structure
 
 2. **Estimator Family**:
-   - Tree-based models (no scaling, label encoding)
-   - Linear models (standard scaling, one-hot encoding)
-   - SVM models (standard scaling, one-hot encoding)
-   - KNN models (min-max scaling, label encoding)
-   - Neural networks (min-max scaling, label encoding)
+   - Tree-based models (no scaling, label encoding, clustering features)
+   - Linear models (standard scaling, one-hot encoding, statistical features)
+   - SVM models (standard scaling, one-hot encoding, polynomial features)
+   - KNN models (min-max scaling, label encoding, distance features)
+   - Neural networks (min-max scaling, label encoding, embedding features)
+   - Ensemble models (all techniques, meta-features)
 
 3. **Task Type**:
-   - Binary classification
-   - Multi-class classification
-   - Regression
-   - Time series forecasting
+   - Binary classification (target encoding, statistical relationships)
+   - Multi-class classification (one-hot encoding, clustering features)
+   - Regression (scaling, outlier handling, domain-specific features)
+   - Time series forecasting (lag features, rolling statistics, technical indicators)
+   - Anomaly detection (clustering, outlier detection, statistical patterns)
+   - Customer segmentation (clustering, RFM analysis, behavioral features)
+
+4. **Domain-Specific Logic**:
+   - Finance: Technical indicators, risk ratios, volatility measures
+   - Healthcare: Vital signs, clinical scores, medical measurements
+   - E-commerce: RFM analysis, customer lifetime value, purchase patterns
+   - NLP: Text statistics, sentiment analysis, readability scores
+   - Geospatial: Distance calculations, proximity features, coordinate systems
 
 ## 🚀 Performance Optimizations
 
 - **Memory efficient**: Sparse matrix support where applicable
-- **Parallel processing**: Multi-core support for expensive operations
+- **Parallel processing**: Multi-core support for expensive operations (clustering, statistical computations)
 - **Incremental learning**: Online learning for large datasets
-- **Caching**: Avoid recomputation of expensive features
+- **Caching**: Avoid recomputation of expensive features (cluster centroids, statistical summaries)
+- **Adaptive computation**: Skip unnecessary computations based on data characteristics
+- **Batch processing**: Optimized batch sizes for large datasets
+- **Memory mapping**: Handle large datasets that don't fit in memory
+- **GPU acceleration**: CUDA support for compatible operations (distance calculations, clustering)
 
 ---
 
