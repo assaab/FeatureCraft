@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "featurecraft"
-version = "0.1.1"
+version = "1.0.0"
 description = "Automatic feature engineering, insights, and sklearn pipelines for tabular ML with optional time-series support."
 readme = "README.md"
 requires-python = ">=3.9"
