@@ -60,14 +60,14 @@ try:
     XGB_AVAILABLE = True
 except ImportError:
     XGB_AVAILABLE = False
-    print("⚠️  XGBoost not available. Installing for GPU acceleration...")
+    print("[!] XGBoost not available. Installing for GPU acceleration...")
     import subprocess
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "xgboost"])
         import xgboost as xgb
         XGB_AVAILABLE = True
     except:
-        print("⚠️  Failed to install XGBoost. Will fall back to sklearn.")
+        print("[!] Failed to install XGBoost. Will fall back to sklearn.")
 
 try:
     from rich.console import Console
@@ -119,7 +119,7 @@ def find_library() -> Tuple[Any, Any]:
     try:
         from featurecraft.pipeline import AutoFeatureEngineer as MainClass
         import featurecraft as module
-        logger.info(f"✓ Found library: featurecraft.pipeline.AutoFeatureEngineer")
+        logger.info(f"[+] Found library: featurecraft.pipeline.AutoFeatureEngineer")
         return module, MainClass
     except ImportError:
         raise RuntimeError(
@@ -163,16 +163,16 @@ def load_ieee_fraud_detection() -> Tuple[pd.DataFrame, pd.Series, str, List[str]
             if identity_path.exists():
                 df_identity = pd.read_csv(identity_path)
                 df = df_trans.merge(df_identity, on='TransactionID', how='left')
-                console.print(f"[green]✓[/green] Merged transaction + identity tables")
+                console.print(f"[green][+][/green] Merged transaction + identity tables")
             else:
                 df = df_trans
                 console.print(f"[yellow]⚠[/yellow] Identity table not found, using transaction only")
             
-            logger.info(f"✓ Loaded IEEE Fraud dataset: {df.shape}")
+            logger.info(f"[+] Loaded IEEE Fraud dataset: {df.shape}")
         else:
             console.print(f"[yellow]⚠[/yellow] IEEE dataset not found, generating synthetic fraud data...")
             df = generate_synthetic_ieee_fraud()
-            logger.info(f"✓ Generated synthetic fraud dataset: {df.shape}")
+            logger.info(f"[+] Generated synthetic fraud dataset: {df.shape}")
         
         # Prepare features and target
         target_col = 'isFraud'
@@ -289,7 +289,7 @@ def load_home_credit_default() -> Tuple[pd.DataFrame, pd.Series, str, List[str]]
                 }).reset_index()
                 bureau_agg.columns = ['SK_ID_CURR'] + [f'BUREAU_{c[0]}_{c[1]}' for c in bureau_agg.columns[1:]]
                 df = df.merge(bureau_agg, on='SK_ID_CURR', how='left')
-                console.print(f"[green]✓[/green] Merged bureau aggregations")
+                console.print(f"[green][+][/green] Merged bureau aggregations")
             
             # Merge previous application data if available
             if prev_app_path.exists():
@@ -302,13 +302,13 @@ def load_home_credit_default() -> Tuple[pd.DataFrame, pd.Series, str, List[str]]
                 }).reset_index()
                 prev_agg.columns = ['SK_ID_CURR'] + [f'PREV_{c[0]}_{c[1]}' for c in prev_agg.columns[1:]]
                 df = df.merge(prev_agg, on='SK_ID_CURR', how='left')
-                console.print(f"[green]✓[/green] Merged previous application aggregations")
+                console.print(f"[green][+][/green] Merged previous application aggregations")
             
-            logger.info(f"✓ Loaded Home Credit dataset: {df.shape}")
+            logger.info(f"[+] Loaded Home Credit dataset: {df.shape}")
         else:
             console.print(f"[yellow]⚠[/yellow] Home Credit dataset not found, generating synthetic data...")
             df = generate_synthetic_home_credit()
-            logger.info(f"✓ Generated synthetic home credit dataset: {df.shape}")
+            logger.info(f"[+] Generated synthetic home credit dataset: {df.shape}")
         
         # Prepare features and target
         target_col = 'TARGET'
@@ -446,11 +446,11 @@ def load_santander_transaction() -> Tuple[pd.DataFrame, pd.Series, str, List[str
                 df = df.sample(n=100000, random_state=42)
                 console.print(f"[yellow]  Sampled to 100k rows for memory efficiency[/yellow]")
             
-            logger.info(f"✓ Loaded Santander dataset: {df.shape}")
+            logger.info(f"[+] Loaded Santander dataset: {df.shape}")
         else:
             console.print(f"[yellow]⚠[/yellow] Santander dataset not found, generating synthetic data...")
             df = generate_synthetic_santander()
-            logger.info(f"✓ Generated synthetic Santander dataset: {df.shape}")
+            logger.info(f"[+] Generated synthetic Santander dataset: {df.shape}")
         
         # Prepare features and target
         target_col = 'target'
@@ -664,9 +664,19 @@ def run_featurecraft_approach(
     X: pd.DataFrame,
     y: pd.Series,
     task: str,
-    artifacts_dir: Path
+    artifacts_dir: Path,
+    use_ai: bool = True
 ) -> Dict[str, Any]:
-    """Run featurecraft automated feature engineering."""
+    """Run featurecraft automated feature engineering with AI optimization.
+    
+    Args:
+        EngineClass: AutoFeatureEngineer class
+        X: Features
+        y: Target
+        task: Task type
+        artifacts_dir: Artifacts directory
+        use_ai: Enable AI-powered optimization (recommended)
+    """
     result = {
         'n_features_in': X.shape[1],
         'n_features_out': X.shape[1],
@@ -675,12 +685,33 @@ def run_featurecraft_approach(
         'memory_usage_mb': 0.0,
         'status': 'success',
         'error': None,
-        'details': 'Automated feature engineering with featurecraft'
+        'details': 'AI-powered automated feature engineering' if use_ai else 'Automated feature engineering'
     }
     
     try:
-        # Initialize
-        afe = EngineClass()
+        # Initialize with AI-powered optimization
+        from featurecraft.config import FeatureCraftConfig
+        import os
+        
+        config = FeatureCraftConfig(
+            validate_schema=True,  # Keep validation enabled for data quality
+            schema_coerce=True,    # Auto-fix minor type and range issues
+            explain_transformations=False,  # Disable explanations to avoid Unicode issues
+            explain_auto_print=False,
+        )
+        
+        # Create with AI optimization enabled
+        api_key = os.getenv("OPENAI_API_KEY")
+        if use_ai and not api_key:
+            console.print("  [yellow]⚠ OPENAI_API_KEY not set - AI mode will fail. Set use_ai=False for heuristics[/yellow]")
+        
+        afe = EngineClass(
+            config=config,
+            use_ai_advisor=use_ai,
+            ai_api_key=api_key,
+            ai_model="gpt-4o-mini",
+            time_budget="balanced",
+        )
         
         # Split with stratification for imbalanced data
         X_train, X_test, y_train, y_test = train_test_split(
@@ -718,7 +749,7 @@ def run_featurecraft_approach(
             export_dir.mkdir(exist_ok=True, parents=True)
             if hasattr(afe, 'export'):
                 afe.export(str(export_dir))
-                console.print(f"[green]  ✓ Pipeline exported to {export_dir}[/green]")
+                console.print(f"[green]  [+] Pipeline exported to {export_dir}[/green]")
         except Exception as e:
             logger.debug(f"Export failed: {e}")
         
@@ -879,39 +910,119 @@ def evaluate_model_imbalanced(
     
     Returns: (cv_roc_auc, cv_std, test_metrics, train_time)
     """
-    # Use GPU-accelerated XGBoost if available
+    # Use GPU-accelerated XGBoost if available (XGBoost 2.0+ API)
     if XGB_AVAILABLE:
         # Try to use GPU, fall back to CPU if GPU not available
         try:
-            model = xgb.XGBClassifier(
-                n_estimators=200,
-                learning_rate=0.05,
-                max_depth=6,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                tree_method='gpu_hist',  # GPU acceleration
-                gpu_id=0,
-                random_state=42,
-                eval_metric='auc',
-                use_label_encoder=False
-            )
-            console.print("  [bold green]✓ Using GPU-accelerated XGBoost[/bold green]")
+            # Check XGBoost version and use appropriate GPU API
+            if hasattr(xgb, '__version__') and xgb.__version__ >= '2.0.0':
+                # XGBoost 2.0+ uses 'device' parameter instead of 'gpu_id' and 'tree_method'
+                try:
+                    # Try to use CUDA GPU 1 (NVIDIA)
+                    model = xgb.XGBClassifier(
+                        n_estimators=200,
+                        learning_rate=0.05,
+                        max_depth=6,
+                        subsample=0.8,
+                        colsample_bytree=0.8,
+                        tree_method='hist',  # Use hist for tree construction
+                        device='cuda:1',  # Use CUDA GPU 1 (NVIDIA)
+                        random_state=42,
+                        eval_metric='auc',
+                        use_label_encoder=False
+                    )
+                    console.print("  [bold green][+] Using XGBoost with CUDA GPU 1[/bold green]")
+                except Exception as e:
+                    console.print(f"  [yellow]⚠ CUDA GPU 1 not available, trying GPU 0: {e}[/yellow]")
+                    try:
+                        model = xgb.XGBClassifier(
+                            n_estimators=200,
+                            learning_rate=0.05,
+                            max_depth=6,
+                            subsample=0.8,
+                            colsample_bytree=0.8,
+                            tree_method='hist',
+                            device='cuda:0',  # Fall back to CUDA GPU 0
+                            random_state=42,
+                            eval_metric='auc',
+                            use_label_encoder=False
+                        )
+                        console.print("  [bold green][+] Using XGBoost with CUDA GPU 0[/bold green]")
+                    except Exception as e2:
+                        console.print(f"  [yellow]⚠ CUDA not available, using CPU: {e2}[/yellow]")
+                        model = xgb.XGBClassifier(
+                            n_estimators=200,
+                            learning_rate=0.05,
+                            max_depth=6,
+                            subsample=0.8,
+                            colsample_bytree=0.8,
+                            tree_method='hist',
+                            device='cpu',  # CPU fallback
+                            random_state=42,
+                            eval_metric='auc',
+                            use_label_encoder=False
+                        )
+            else:
+                # Older XGBoost version - use legacy GPU API
+                try:
+                    model = xgb.XGBClassifier(
+                        n_estimators=200,
+                        learning_rate=0.05,
+                        max_depth=6,
+                        subsample=0.8,
+                        colsample_bytree=0.8,
+                        tree_method='gpu_hist',
+                        gpu_id=1,  # Try GPU 1 first
+                        random_state=42,
+                        eval_metric='auc',
+                        use_label_encoder=False
+                    )
+                    console.print("  [bold green][+] Using XGBoost GPU 1 (legacy API)[/bold green]")
+                except Exception as e:
+                    console.print(f"  [yellow]⚠ GPU 1 not available, trying GPU 0: {e}[/yellow]")
+                    try:
+                        model = xgb.XGBClassifier(
+                            n_estimators=200,
+                            learning_rate=0.05,
+                            max_depth=6,
+                            subsample=0.8,
+                            colsample_bytree=0.8,
+                            tree_method='gpu_hist',
+                            gpu_id=0,  # Fall back to GPU 0
+                            random_state=42,
+                            eval_metric='auc',
+                            use_label_encoder=False
+                        )
+                        console.print("  [bold green][+] Using XGBoost GPU 0 (legacy API)[/bold green]")
+                    except Exception as e2:
+                        console.print(f"  [yellow]⚠ GPU not available, using CPU: {e2}[/yellow]")
+                        model = xgb.XGBClassifier(
+                            n_estimators=200,
+                            learning_rate=0.05,
+                            max_depth=6,
+                            subsample=0.8,
+                            colsample_bytree=0.8,
+                            tree_method='hist',
+                            random_state=42,
+                            eval_metric='auc',
+                            use_label_encoder=False
+                        )
         except Exception as e:
-            console.print(f"  [yellow]⚠ GPU not available, using CPU XGBoost: {e}[/yellow]")
+            console.print(f"  [yellow]⚠ XGBoost setup failed, using CPU: {e}[/yellow]")
             model = xgb.XGBClassifier(
                 n_estimators=200,
                 learning_rate=0.05,
                 max_depth=6,
                 subsample=0.8,
                 colsample_bytree=0.8,
-                tree_method='hist',  # CPU fallback
+                tree_method='hist',
                 random_state=42,
                 eval_metric='auc',
                 use_label_encoder=False
             )
     else:
         # Fallback to sklearn
-        console.print("  [yellow]⚠ Using sklearn GradientBoostingClassifier (CPU)[/yellow]")
+        console.print("  [yellow]⚠ XGBoost not available, using sklearn GradientBoostingClassifier (CPU)[/yellow]")
         model = GradientBoostingClassifier(
             n_estimators=100,
             learning_rate=0.05,
@@ -1059,7 +1170,7 @@ def create_comparison_plots(results: List[ComplexBenchmarkResult], artifacts_dir
         plt.savefig(plot_path, dpi=150, bbox_inches='tight')
         plt.close()
         
-        console.print(f"[green]✓[/green] Comparison plots saved to {plot_path}")
+        console.print(f"[green][+][/green] Comparison plots saved to {plot_path}")
         
     except Exception as e:
         logger.warning(f"Failed to create comparison plots: {e}")
@@ -1084,7 +1195,7 @@ def main():
     console.print(Panel.fit(
         "[bold red]FeatureCraft COMPLEX Kaggle Benchmark Suite[/bold red]\n"
         "[bold yellow]Testing on Production-Scale, Messy, Real-World Datasets[/bold yellow]\n"
-        "[cyan]High Cardinality • Heavy Imbalance • Missing Data • Multi-Table[/cyan]",
+        "[cyan]High Cardinality - Heavy Imbalance - Missing Data - Multi-Table[/cyan]",
         border_style="red",
         box=box.DOUBLE
     ))
@@ -1093,9 +1204,9 @@ def main():
     # Find library
     try:
         module, EngineClass = find_library()
-        console.print(f"[green]✓[/green] Library found: {EngineClass.__name__}\n")
+        console.print(f"[green]+[/green] Library found: {EngineClass.__name__}\n")
     except RuntimeError as e:
-        console.print(f"[red]✗[/red] {e}")
+        console.print(f"[red][-][/red] {e}")
         sys.exit(1)
     
     # Define datasets
@@ -1111,7 +1222,7 @@ def main():
         selected_datasets = [d.strip() for d in args.datasets.split(",")]
     
     console.print(f"[cyan]Datasets to benchmark:[/cyan] {', '.join(selected_datasets)}")
-    console.print(f"[cyan]Approaches:[/cyan] Featurecraft (automated) | Advanced Manual (expert) | Baseline\n")
+    console.print(f"[cyan]Approach:[/cyan] Featurecraft (automated) ONLY - Model Training ENABLED\n")
     
     # Run benchmarks
     all_results: List[ComplexBenchmarkResult] = []
@@ -1125,7 +1236,7 @@ def main():
         
         for dataset_name in selected_datasets:
             if dataset_name not in available_datasets:
-                console.print(f"[red]✗[/red] Unknown dataset: {dataset_name}")
+                console.print(f"[red][-][/red] Unknown dataset: {dataset_name}")
                 continue
             
             console.print(f"\n[bold yellow]{'='*80}[/bold yellow]")
@@ -1139,7 +1250,7 @@ def main():
                 progress.remove_task(task_load)
                 
                 # Print dataset info
-                console.print(f"[green]✓[/green] Loaded: {X.shape[0]:,} rows × {X.shape[1]:,} features")
+                console.print(f"[green][+][/green] Loaded: {X.shape[0]:,} rows × {X.shape[1]:,} features")
                 console.print(f"[cyan]  Task:[/cyan] {task}")
                 
                 # Class distribution
@@ -1153,21 +1264,19 @@ def main():
                 # Challenges
                 console.print(f"[bold red]  Challenges:[/bold red]")
                 for challenge in challenges:
-                    console.print(f"    • {challenge}")
+                    console.print(f"    - {challenge}")
                 console.print()
                 
                 artifacts_dir = artifacts_base / dataset_name
                 artifacts_dir.mkdir(exist_ok=True, parents=True)
                 
-                # Test 3 approaches
+                # Test ONLY FeatureCraft approach (model training enabled)
                 approaches = [
-                    ('baseline', lambda: run_baseline_approach(X, y, task)),
-                    ('advanced_manual', lambda: run_advanced_manual_approach(X, y, task, dataset_name)),
                     ('featurecraft', lambda: run_featurecraft_approach(EngineClass, X, y, task, artifacts_dir))
                 ]
                 
                 for approach_name, approach_func in approaches:
-                    console.print(f"[bold cyan]→ Approach: {approach_name.upper().replace('_', ' ')}[/bold cyan]")
+                    console.print(f"[bold cyan]-> Approach: {approach_name.upper().replace('_', ' ')}[/bold cyan]")
                     
                     try:
                         # Feature engineering
@@ -1176,12 +1285,12 @@ def main():
                         progress.remove_task(task_fe)
                         
                         if fe_result['status'] == 'failed':
-                            console.print(f"  [red]✗ Failed: {fe_result['error']}[/red]\n")
+                            console.print(f"  [red][-] Failed: {fe_result['error']}[/red]\n")
                             continue
                         
-                        console.print(f"  [green]✓[/green] Features: {fe_result['n_features_in']:,} → {fe_result['n_features_out']:,}")
-                        console.print(f"  [green]✓[/green] Fit: {fe_result['fit_time']:.2f}s | Transform: {fe_result['transform_time']:.2f}s")
-                        console.print(f"  [green]✓[/green] Memory: {fe_result['memory_usage_mb']:.1f} MB")
+                        console.print(f"  [green][+][/green] Features: {fe_result['n_features_in']:,} -> {fe_result['n_features_out']:,}")
+                        console.print(f"  [green][+][/green] Fit: {fe_result['fit_time']:.2f}s | Transform: {fe_result['transform_time']:.2f}s")
+                        console.print(f"  [green][+][/green] Memory: {fe_result['memory_usage_mb']:.1f} MB")
                         
                         # Train and evaluate
                         task_eval = progress.add_task(f"  [cyan]Training & evaluating (5-fold CV)...", total=None)
@@ -1194,10 +1303,10 @@ def main():
                         )
                         progress.remove_task(task_eval)
                         
-                        console.print(f"  [bold green]✓ CV ROC-AUC: {cv_roc_auc:.4f} (±{cv_std:.4f})[/bold green]")
-                        console.print(f"  [green]✓[/green] Test ROC-AUC: {test_metrics['roc_auc']:.4f} | AP: {test_metrics['avg_precision']:.4f}")
-                        console.print(f"  [green]✓[/green] Precision: {test_metrics['precision']:.4f} | Recall: {test_metrics['recall']:.4f} | F1: {test_metrics['f1_score']:.4f}")
-                        console.print(f"  [green]✓[/green] Train time: {train_time:.2f}s\n")
+                        console.print(f"  [bold green][+] CV ROC-AUC: {cv_roc_auc:.4f} (±{cv_std:.4f})[/bold green]")
+                        console.print(f"  [green][+][/green] Test ROC-AUC: {test_metrics['roc_auc']:.4f} | AP: {test_metrics['avg_precision']:.4f}")
+                        console.print(f"  [green][+][/green] Precision: {test_metrics['precision']:.4f} | Recall: {test_metrics['recall']:.4f} | F1: {test_metrics['f1_score']:.4f}")
+                        console.print(f"  [green][+][/green] Train time: {train_time:.2f}s\n")
                         
                         # Store result
                         result = ComplexBenchmarkResult(
@@ -1221,11 +1330,11 @@ def main():
                         all_results.append(result)
                         
                     except Exception as e:
-                        console.print(f"  [red]✗ Failed: {e}[/red]\n")
+                        console.print(f"  [red][-] Failed: {e}[/red]\n")
                         logger.error(traceback.format_exc())
                 
             except Exception as e:
-                console.print(f"[red]✗ Dataset loading failed: {e}[/red]")
+                console.print(f"[red][-] Dataset loading failed: {e}[/red]")
                 logger.error(traceback.format_exc())
     
     # Summary
@@ -1237,103 +1346,72 @@ def main():
         console.print("[red]No results to display[/red]")
         return
     
-    # Create results table
+    # Create results table (FeatureCraft only)
     table = Table(
-        show_header=True, 
-        header_style="bold magenta", 
-        title="Complex Kaggle Benchmark Results",
+        show_header=True,
+        header_style="bold magenta",
+        title="FeatureCraft Results Summary",
         box=box.DOUBLE_EDGE
     )
     table.add_column("Dataset", style="cyan", width=15)
-    table.add_column("Approach", style="yellow", width=15)
     table.add_column("Features", justify="center", width=12)
     table.add_column("CV ROC-AUC", justify="right", width=15)
     table.add_column("Test ROC-AUC", justify="right", style="green", width=12)
     table.add_column("Precision", justify="right", width=10)
     table.add_column("Recall", justify="right", width=10)
-    table.add_column("Time(s)", justify="right", width=10)
-    
+    table.add_column("F1-Score", justify="right", width=10)
+    table.add_column("Train Time(s)", justify="right", width=12)
+
     for res in all_results:
         total_time = res.fit_time + res.transform_time + res.train_time
-        
+
         table.add_row(
             res.dataset.replace('_', ' ').title(),
-            res.approach.replace('_', ' ').title(),
-            f"{res.n_features_in}→{res.n_features_out}",
+            f"{res.n_features_in}->{res.n_features_out}",
             f"{res.cv_roc_auc:.4f}±{res.cv_std:.3f}",
             f"{res.test_metrics['roc_auc']:.4f}",
             f"{res.test_metrics['precision']:.3f}",
             f"{res.test_metrics['recall']:.3f}",
+            f"{res.test_metrics['f1_score']:.3f}",
             f"{total_time:.1f}"
         )
     
     console.print(table)
     
-    # Comparative analysis
+    # FeatureCraft Performance Summary (Single Approach Test)
     console.print(f"\n[bold green]{'='*90}[/bold green]")
-    console.print(f"[bold green]COMPARATIVE ANALYSIS[/bold green]")
+    console.print(f"[bold green]FEATURECRAFT PERFORMANCE SUMMARY[/bold green]")
     console.print(f"[bold green]{'='*90}[/bold green]\n")
-    
+
     df_results = pd.DataFrame([asdict(r) for r in all_results])
-    
+
     for dataset in df_results['dataset'].unique():
         dataset_results = df_results[df_results['dataset'] == dataset]
         console.print(f"[bold cyan]{dataset.upper().replace('_', ' ')}:[/bold cyan]")
-        
-        # Find best approach
-        best_idx = dataset_results['cv_roc_auc'].idxmax()
-        best = dataset_results.loc[best_idx]
-        
-        console.print(f"  🏆 Best: [bold green]{best['approach'].replace('_', ' ').title()}[/bold green] "
-                     f"(ROC-AUC={best['cv_roc_auc']:.4f})")
-        
-        # Compare featurecraft vs others
+
+        # Show FeatureCraft results
         if 'featurecraft' in dataset_results['approach'].values:
             fc_result = dataset_results[dataset_results['approach'] == 'featurecraft'].iloc[0]
-            baseline_result = dataset_results[dataset_results['approach'] == 'baseline'].iloc[0]
-            
-            improvement = (fc_result['cv_roc_auc'] - baseline_result['cv_roc_auc']) / baseline_result['cv_roc_auc'] * 100
-            console.print(f"  📊 Featurecraft vs Baseline: "
-                         f"[{'green' if improvement > 0 else 'red'}]{improvement:+.2f}%[/{'green' if improvement > 0 else 'red'}]")
-            
-            if 'advanced_manual' in dataset_results['approach'].values:
-                manual_result = dataset_results[dataset_results['approach'] == 'advanced_manual'].iloc[0]
-                improvement_vs_manual = (fc_result['cv_roc_auc'] - manual_result['cv_roc_auc']) / manual_result['cv_roc_auc'] * 100
-                console.print(f"  📊 Featurecraft vs Expert Manual: "
-                             f"[{'green' if improvement_vs_manual > 0 else 'red'}]{improvement_vs_manual:+.2f}%[/{'green' if improvement_vs_manual > 0 else 'red'}]")
-            
-            # Time comparison
-            fc_time = fc_result['fit_time'] + fc_result['transform_time']
-            baseline_time = baseline_result['fit_time'] + baseline_result['transform_time']
-            time_ratio = fc_time / baseline_time if baseline_time > 0 else 1
-            console.print(f"  ⏱️  Time overhead: {time_ratio:.2f}x baseline")
-            
-            # Memory comparison
-            console.print(f"  💾 Memory usage: {fc_result['memory_usage_mb']:.1f} MB")
-        
+
+            console.print(f"  [+] Featurecraft: {fc_result['n_features_in']:,} -> {fc_result['n_features_out']:,} features")
+            console.print(f"  [TIME]  Fit time: {fc_result['fit_time']:.2f}s | Transform: {fc_result['transform_time']:.2f}s")
+            console.print(f"  [MEM] Memory: {fc_result['memory_usage_mb']:.1f} MB")
+            console.print(f"  [SCORE] CV ROC-AUC: {fc_result['cv_roc_auc']:.4f} (±{fc_result['cv_std']:.4f})")
+            console.print(f"  [SCORE] Test ROC-AUC: {fc_result['test_metrics']['roc_auc']:.4f} | AP: {fc_result['test_metrics']['avg_precision']:.4f}")
+            console.print(f"  [SCORE] Precision: {fc_result['test_metrics']['precision']:.4f} | Recall: {fc_result['test_metrics']['recall']:.4f} | F1: {fc_result['test_metrics']['f1_score']:.4f}")
+
         console.print()
-    
-    # Overall winner
-    console.print(f"[bold magenta]{'='*90}[/bold magenta]")
-    console.print(f"[bold magenta]OVERALL WINNER[/bold magenta]")
-    console.print(f"[bold magenta]{'='*90}[/bold magenta]\n")
-    
-    overall_scores = df_results.groupby('approach')['cv_roc_auc'].mean().sort_values(ascending=False)
-    console.print("[bold]Average ROC-AUC across all datasets:[/bold]")
-    for approach, score in overall_scores.items():
-        emoji = "🥇" if approach == overall_scores.index[0] else ("🥈" if approach == overall_scores.index[1] else "🥉")
-        console.print(f"  {emoji} {approach.replace('_', ' ').title()}: {score:.4f}")
     
     # Save results
     results_json = artifacts_base / "complex_benchmark_results.json"
     results_json.write_text(json.dumps([asdict(r) for r in all_results], indent=2, default=str))
-    console.print(f"\n[green]✓[/green] Results saved to {results_json}")
+    console.print(f"\n[green][+][/green] Results saved to {results_json}")
     
-    # Create comparison plots
-    create_comparison_plots(all_results, artifacts_base)
+    # Skip comparison plots (single approach test)
+    # create_comparison_plots(all_results, artifacts_base)
     
-    console.print(f"[green]✓[/green] All artifacts saved to {artifacts_base}")
-    console.print("\n[bold green]🎉 Complex benchmark complete! 🎉[/bold green]\n")
+    console.print(f"[green][+][/green] All artifacts saved to {artifacts_base}")
+    console.print("\n[bold green]🎉 FeatureCraft performance test complete! 🎉[/bold green]\n")
 
 
 if __name__ == "__main__":

@@ -1134,3 +1134,875 @@ class CountEncoder(BaseEstimator, TransformerMixin):
             List of count-encoded feature names
         """
         return [f"count_{c}" for c in self.columns_]
+
+
+class CatBoostEncoder(BaseEstimator, TransformerMixin, LeakageGuardMixin):
+    """CatBoost-style target encoding using ordered target statistics.
+    
+    Implements the target encoding strategy used in CatBoost: computes cumulative
+    target statistics for each category in a randomized order during training.
+    This prevents overfitting by ensuring each observation uses only prior observations
+    in the encoding, similar to online learning.
+    
+    Algorithm:
+    1. Shuffle training data (with fixed random_state for reproducibility)
+    2. For each row i with category c:
+        - Compute encoding using only rows 0..i-1 with category c
+        - encoding = (sum_target + prior * smoothing) / (count + smoothing)
+    3. For inference, use global statistics computed from all training data
+    
+    This is more robust than standard target encoding and works well with tree models.
+    
+    Args:
+        cols: Columns to encode (None = infer from fit data)
+        smoothing: Smoothing parameter (higher = more regularization toward prior)
+        random_state: Random seed for shuffling order
+        task: "classification" or "regression" (auto-inferred if None)
+        positive_class: Positive class for binary classification (auto-inferred if None)
+        prior_strategy: "global_mean" or "median"
+        
+    Attributes:
+        global_maps_: Global encoding map (column → category → encoded value)
+        global_priors_: Global prior for each column
+        columns_: List of encoded columns
+        
+    Example:
+        >>> # Training with ordered target statistics
+        >>> encoder = CatBoostEncoder(cols=['city'], smoothing=10.0)
+        >>> X_train_encoded = encoder.fit_transform(X_train, y_train)
+        >>> 
+        >>> # Inference with global map
+        >>> X_test_encoded = encoder.transform(X_test)
+        
+    Notes:
+        - Designed for tree-based models (particularly CatBoost, XGBoost, LightGBM)
+        - More stable than K-fold target encoding for small datasets
+        - Prevents overfitting through ordered statistics approach
+    """
+    
+    def __init__(
+        self,
+        cols: Optional[list[str]] = None,
+        smoothing: float = 10.0,
+        random_state: int = 42,
+        task: Optional[str] = None,
+        positive_class: Optional[Any] = None,
+        prior_strategy: str = "global_mean",
+        raise_on_target_in_transform: bool = True,
+    ) -> None:
+        """Initialize CatBoost encoder."""
+        self.cols = cols
+        self.smoothing = float(smoothing)
+        self.random_state = int(random_state)
+        self.task = task
+        self.positive_class = positive_class
+        self.prior_strategy = prior_strategy
+        self.raise_on_target_in_transform = raise_on_target_in_transform
+        
+        # Fitted state
+        self.global_maps_: dict[str, dict[Any, float]] = {}
+        self.global_priors_: dict[str, float] = {}
+        self.columns_: list[str] = []
+        self.ordered_encodings_: Optional[np.ndarray] = None
+        self._fitted_task: Optional[str] = None
+        self._fitted_positive_class: Optional[Any] = None
+    
+    def _prepare_target(self, y: pd.Series) -> tuple[pd.Series, str, Any]:
+        """Prepare target variable for encoding.
+        
+        Args:
+            y: Raw target Series
+            
+        Returns:
+            (encoded_target, task, positive_class)
+        """
+        # Infer task
+        if self.task:
+            task = self.task
+        else:
+            nunique = y.nunique()
+            task = "classification" if nunique <= 20 else "regression"
+        
+        # Encode target
+        if task == "classification":
+            # Binary or multiclass classification
+            if self.positive_class is not None:
+                pos_class = self.positive_class
+            else:
+                # Infer positive class
+                if y.nunique() == 2 and set(y.unique()) <= {0, 1}:
+                    pos_class = 1
+                else:
+                    pos_class = y.value_counts().idxmax()
+            
+            y_enc = (y == pos_class).astype(float)
+            return y_enc, task, pos_class
+        else:
+            # Regression
+            y_enc = y.astype(float)
+            return y_enc, task, None
+    
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "CatBoostEncoder":
+        """Fit encoder by learning global encoding maps.
+        
+        For training, use fit_transform() to get ordered encodings.
+        
+        Args:
+            X: Training features
+            y: Training target
+            
+        Returns:
+            Self
+        """
+        df = pd.DataFrame(X).copy()
+        y_series = pd.Series(y).reset_index(drop=True)
+        
+        self.columns_ = self.cols if self.cols else list(df.columns)
+        df = df[self.columns_].astype(str).reset_index(drop=True)
+        
+        # Prepare target
+        y_enc, task, pos_class = self._prepare_target(y_series)
+        self._fitted_task = task
+        self._fitted_positive_class = pos_class
+        
+        # Compute global prior
+        if self.prior_strategy == "median":
+            global_prior = float(y_enc.median())
+        else:  # global_mean
+            global_prior = float(y_enc.mean())
+        
+        # Learn global encoding maps using all training data
+        for col in self.columns_:
+            self.global_priors_[col] = global_prior
+            self.global_maps_[col] = {}
+            
+            # Aggregate target by category
+            temp = pd.DataFrame({col: df[col].values, "target": y_enc.values})
+            agg = temp.groupby(col)["target"].agg(["sum", "count"])
+            
+            for cat_val in agg.index:
+                cat_sum = float(agg.loc[cat_val, "sum"])
+                cat_count = int(agg.loc[cat_val, "count"])
+                
+                # Apply smoothing
+                smoothed = (cat_sum + global_prior * self.smoothing) / (cat_count + self.smoothing)
+                self.global_maps_[col][cat_val] = float(smoothed)
+        
+        logger.debug(f"Fitted CatBoostEncoder on {len(self.columns_)} columns with task={task}")
+        return self
+    
+    def fit_transform(self, X: pd.DataFrame, y: pd.Series) -> np.ndarray:
+        """Fit encoder and return ordered target statistics for training data.
+        
+        **CRITICAL**: This method uses ordered (cumulative) statistics to prevent overfitting.
+        Each training row receives an encoding computed from only PRIOR rows in shuffled order.
+        
+        Args:
+            X: Training features
+            y: Training target
+            
+        Returns:
+            Ordered encoded training data (n_samples, n_columns)
+        """
+        df = pd.DataFrame(X).copy()
+        y_series = pd.Series(y).reset_index(drop=True)
+        
+        self.columns_ = self.cols if self.cols else list(df.columns)
+        df = df[self.columns_].astype(str).reset_index(drop=True)
+        
+        # Prepare target
+        y_enc, task, pos_class = self._prepare_target(y_series)
+        self._fitted_task = task
+        self._fitted_positive_class = pos_class
+        
+        # Compute global prior
+        if self.prior_strategy == "median":
+            global_prior = float(y_enc.median())
+        else:
+            global_prior = float(y_enc.mean())
+        
+        # Initialize encoding matrix
+        n_samples = len(df)
+        n_cols = len(self.columns_)
+        ordered_matrix = np.full((n_samples, n_cols), global_prior, dtype=float)
+        
+        # Create random permutation for ordered statistics
+        rng = np.random.RandomState(self.random_state)
+        permutation = rng.permutation(n_samples)
+        inverse_permutation = np.argsort(permutation)
+        
+        # Shuffle data and target
+        df_shuffled = df.iloc[permutation].reset_index(drop=True)
+        y_shuffled = y_enc.iloc[permutation].reset_index(drop=True)
+        
+        # Compute ordered encodings column by column
+        for col_idx, col in enumerate(self.columns_):
+            self.global_priors_[col] = global_prior
+            self.global_maps_[col] = {}
+            
+            # Track cumulative statistics for each category
+            cumulative_sum: dict[Any, float] = {}
+            cumulative_count: dict[Any, int] = {}
+            
+            # Accumulate global statistics
+            global_stats: dict[Any, tuple[float, int]] = {}
+            
+            # Process rows in shuffled order
+            for i in range(n_samples):
+                cat_val = df_shuffled.loc[i, col]
+                target_val = y_shuffled.iloc[i]
+                
+                # Compute encoding using cumulative statistics (prior rows only)
+                if cat_val in cumulative_sum:
+                    cat_sum = cumulative_sum[cat_val]
+                    cat_count = cumulative_count[cat_val]
+                    encoded_val = (cat_sum + global_prior * self.smoothing) / (cat_count + self.smoothing)
+                else:
+                    # First occurrence of this category - use prior
+                    encoded_val = global_prior
+                
+                # Store encoding in original order
+                original_idx = inverse_permutation[i]
+                ordered_matrix[original_idx, col_idx] = encoded_val
+                
+                # Update cumulative statistics for next iteration
+                if cat_val in cumulative_sum:
+                    cumulative_sum[cat_val] += target_val
+                    cumulative_count[cat_val] += 1
+                else:
+                    cumulative_sum[cat_val] = target_val
+                    cumulative_count[cat_val] = 1
+                
+                # Accumulate for global map
+                if cat_val in global_stats:
+                    prev_sum, prev_count = global_stats[cat_val]
+                    global_stats[cat_val] = (prev_sum + target_val, prev_count + 1)
+                else:
+                    global_stats[cat_val] = (target_val, 1)
+            
+            # Build global map for this column
+            for cat_val, (cat_sum, cat_count) in global_stats.items():
+                smoothed = (cat_sum + global_prior * self.smoothing) / (cat_count + self.smoothing)
+                self.global_maps_[col][cat_val] = float(smoothed)
+        
+        self.ordered_encodings_ = ordered_matrix
+        logger.info(
+            f"Generated CatBoost ordered encodings for {n_samples} samples, "
+            f"{n_cols} columns with random_state={self.random_state}"
+        )
+        return ordered_matrix
+    
+    def transform(self, X: pd.DataFrame, y: Optional[pd.Series] = None) -> np.ndarray:
+        """Transform using global encoding map (for inference).
+        
+        Args:
+            X: Features to encode
+            y: Target (should be None to prevent leakage; ignored if provided with warning)
+            
+        Returns:
+            Encoded features (n_samples, n_columns)
+        """
+        # CRITICAL: Enforce leakage guard
+        self.ensure_no_target_in_transform(y)
+        
+        if not self.global_maps_:
+            raise RuntimeError("CatBoostEncoder not fitted. Call fit() or fit_transform() first.")
+        
+        df = pd.DataFrame(X).copy()
+        df = df[self.columns_].astype(str)
+        
+        out = []
+        for col in self.columns_:
+            s = df[col]
+            m = self.global_maps_.get(col, {})
+            prior = self.global_priors_.get(col, 0.0)
+            
+            vals = s.map(lambda v, _m=m, _prior=prior: _m.get(v, _prior)).astype(float).values.reshape(-1, 1)
+            out.append(vals)
+        
+        return np.hstack(out)
+    
+    def get_feature_names_out(self, input_features: Optional[list[str]] = None) -> list[str]:
+        """Get output feature names.
+        
+        Args:
+            input_features: Input feature names (unused, returns fitted columns)
+            
+        Returns:
+            List of encoded feature names
+        """
+        return [f"catboost_{c}" for c in self.columns_]
+
+
+class BinaryEncoder(BaseEstimator, TransformerMixin):
+    """Binary encoding: converts categories to binary representation.
+    
+    More memory-efficient than one-hot encoding for high cardinality features.
+    Each category is assigned an integer ID, then converted to binary digits.
+    For N unique categories, only ceil(log2(N)) binary features are created.
+    
+    Example:
+        Categories: ['cat', 'dog', 'bird', 'fish'] (4 categories)
+        Binary encoding (2 bits needed):
+            cat  -> 00 -> [0, 0]
+            dog  -> 01 -> [0, 1]
+            bird -> 10 -> [1, 0]
+            fish -> 11 -> [1, 1]
+    
+    Args:
+        cols: Columns to encode (None = infer from fit data)
+        handle_unknown: How to handle unknown categories - 'value' (use unknown_value) or 'error'
+        unknown_value: Integer ID for unknown categories (default: -1)
+        
+    Attributes:
+        category_maps_: Dict mapping column → category → integer ID
+        n_bits_: Dict mapping column → number of binary bits needed
+        columns_: List of encoded columns
+        
+    Example:
+        >>> encoder = BinaryEncoder(cols=['city', 'country'])
+        >>> encoder.fit(X_train)
+        >>> X_encoded = encoder.transform(X_test)
+    """
+    
+    def __init__(
+        self,
+        cols: Optional[list[str]] = None,
+        handle_unknown: str = "value",
+        unknown_value: int = -1,
+    ) -> None:
+        """Initialize binary encoder."""
+        self.cols = cols
+        self.handle_unknown = handle_unknown
+        self.unknown_value = unknown_value
+        self.category_maps_: dict[str, dict[Any, int]] = {}
+        self.n_bits_: dict[str, int] = {}
+        self.columns_: list[str] = []
+    
+    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None) -> "BinaryEncoder":
+        """Fit binary encoder by assigning integer IDs to categories.
+        
+        Args:
+            X: Training features
+            y: Target (ignored, for sklearn compatibility)
+            
+        Returns:
+            Self
+        """
+        df = pd.DataFrame(X).copy()
+        self.columns_ = self.cols if self.cols else list(df.columns)
+        df = df[self.columns_].astype(str)
+        
+        for col in self.columns_:
+            # Get unique categories and assign integer IDs (starting from 0)
+            unique_cats = df[col].unique()
+            n_categories = len(unique_cats)
+            
+            # Create mapping: category -> integer ID
+            self.category_maps_[col] = {cat: idx for idx, cat in enumerate(unique_cats)}
+            
+            # Calculate number of binary bits needed: ceil(log2(n_categories))
+            # Minimum 1 bit even for 1 category
+            n_bits = max(1, int(np.ceil(np.log2(max(n_categories, 2)))))
+            self.n_bits_[col] = n_bits
+        
+        logger.debug(
+            f"Fitted BinaryEncoder on {len(self.columns_)} columns. "
+            f"Bits per column: {self.n_bits_}"
+        )
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> np.ndarray:
+        """Transform using binary encoding.
+        
+        Args:
+            X: Features to encode
+            
+        Returns:
+            Binary-encoded features (n_samples, total_bits)
+        """
+        df = pd.DataFrame(X).copy()
+        df = df[self.columns_].astype(str)
+        
+        out = []
+        for col in self.columns_:
+            category_map = self.category_maps_.get(col, {})
+            n_bits = self.n_bits_.get(col, 1)
+            
+            # Map categories to integer IDs
+            ids = df[col].map(
+                lambda v: category_map.get(v, self.unknown_value)
+            ).astype(int)
+            
+            # Handle unknown categories
+            if self.handle_unknown == "error":
+                if (ids == self.unknown_value).any():
+                    unknown_vals = df[col][ids == self.unknown_value].unique()
+                    raise ValueError(
+                        f"Unknown categories in column '{col}': {unknown_vals}. "
+                        f"Set handle_unknown='value' to use default encoding."
+                    )
+            
+            # Convert integer IDs to binary representation
+            # For each sample, create n_bits binary features
+            binary_matrix = np.zeros((len(ids), n_bits), dtype=int)
+            
+            for i, cat_id in enumerate(ids):
+                if cat_id >= 0:
+                    # Convert to binary and fill the array (most significant bit first)
+                    binary_str = format(cat_id, f'0{n_bits}b')
+                    binary_matrix[i] = [int(bit) for bit in binary_str]
+                else:
+                    # Unknown category - use all zeros or special encoding
+                    binary_matrix[i] = np.zeros(n_bits, dtype=int)
+            
+            out.append(binary_matrix)
+        
+        return np.hstack(out) if out else np.empty((len(df), 0))
+    
+    def get_feature_names_out(self, input_features: Optional[list[str]] = None) -> list[str]:
+        """Get output feature names for binary encoded features.
+        
+        Args:
+            input_features: Input feature names (unused)
+            
+        Returns:
+            List of binary feature names (e.g., 'binary_city_0', 'binary_city_1', ...)
+        """
+        names = []
+        for col in self.columns_:
+            n_bits = self.n_bits_.get(col, 1)
+            for bit_idx in range(n_bits):
+                names.append(f"binary_{col}_{bit_idx}")
+        return names
+
+
+class EntityEmbeddingsEncoder(BaseEstimator, TransformerMixin, LeakageGuardMixin):
+    """Entity Embeddings: Neural network-based learned representations for categorical features.
+    
+    Trains a simple neural network with embedding layers to learn dense vector representations
+    of categorical features, supervised by the target variable. This approach was popularized
+    by the "Entity Embeddings of Categorical Variables" paper (Guo & Berkhahn, 2016).
+    
+    The encoder creates a neural network with:
+    1. Embedding layers for each categorical column (maps category → dense vector)
+    2. Concatenation of all embeddings
+    3. Dense layers trained to predict the target
+    4. Embeddings are extracted and used as features
+    
+    Benefits:
+    - Learns meaningful relationships between categories
+    - Handles high cardinality naturally
+    - Captures non-linear patterns
+    - Embeddings can reveal semantic similarities
+    
+    Drawbacks:
+    - Requires neural network training (slower than other encoders)
+    - Needs sufficient data (100+ samples per category recommended)
+    - Requires target variable (supervised method)
+    - Optional dependency on deep learning framework
+    
+    Args:
+        cols: Columns to encode (None = infer from fit data)
+        embedding_dim: Embedding dimension (None = auto: min(50, cardinality // 2))
+        hidden_dims: Hidden layer dimensions (e.g., [128, 64])
+        epochs: Number of training epochs
+        batch_size: Training batch size
+        learning_rate: Learning rate for optimizer
+        dropout: Dropout rate for regularization
+        validation_split: Fraction of data for validation
+        early_stopping_patience: Patience for early stopping (None = no early stopping)
+        task: "classification" or "regression" (auto-inferred if None)
+        random_state: Random seed for reproducibility
+        verbose: Verbosity level (0=silent, 1=progress, 2=debug)
+        backend: Deep learning backend - 'keras' (TensorFlow/Keras) or 'pytorch'
+        
+    Attributes:
+        embeddings_: Dict mapping column → embedding matrix (n_categories, embedding_dim)
+        category_maps_: Dict mapping column → category → integer ID
+        embedding_dims_: Dict mapping column → embedding dimension
+        model_: Trained neural network model
+        columns_: List of encoded columns
+        
+    Example:
+        >>> # Train embeddings on categorical features
+        >>> encoder = EntityEmbeddingsEncoder(
+        ...     cols=['city', 'category', 'brand'],
+        ...     embedding_dim=10,
+        ...     hidden_dims=[64, 32],
+        ...     epochs=20
+        ... )
+        >>> X_train_encoded = encoder.fit_transform(X_train, y_train)
+        >>> X_test_encoded = encoder.transform(X_test)
+        >>> 
+        >>> # Inspect learned embeddings
+        >>> city_embeddings = encoder.get_embeddings()['city']
+        
+    Notes:
+        - Requires TensorFlow/Keras or PyTorch (optional dependencies)
+        - Training time depends on dataset size and network complexity
+        - For best results, normalize/scale target for regression tasks
+        - Consider using pre-trained embeddings for transfer learning scenarios
+    """
+    
+    def __init__(
+        self,
+        cols: Optional[list[str]] = None,
+        embedding_dim: Optional[int] = None,
+        hidden_dims: Optional[list[int]] = None,
+        epochs: int = 10,
+        batch_size: int = 256,
+        learning_rate: float = 0.001,
+        dropout: float = 0.1,
+        validation_split: float = 0.2,
+        early_stopping_patience: Optional[int] = 3,
+        task: Optional[str] = None,
+        random_state: int = 42,
+        verbose: int = 0,
+        backend: str = "keras",
+        raise_on_target_in_transform: bool = True,
+    ) -> None:
+        """Initialize entity embeddings encoder."""
+        self.cols = cols
+        self.embedding_dim = embedding_dim
+        self.hidden_dims = hidden_dims if hidden_dims is not None else [128, 64]
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.dropout = dropout
+        self.validation_split = validation_split
+        self.early_stopping_patience = early_stopping_patience
+        self.task = task
+        self.random_state = random_state
+        self.verbose = verbose
+        self.backend = backend
+        self.raise_on_target_in_transform = raise_on_target_in_transform
+        
+        # Fitted state
+        self.embeddings_: dict[str, np.ndarray] = {}
+        self.category_maps_: dict[str, dict[Any, int]] = {}
+        self.embedding_dims_: dict[str, int] = {}
+        self.columns_: list[str] = []
+        self.model_ = None
+        self._fitted_task: Optional[str] = None
+        self._embedding_layers_: dict[str, Any] = {}
+    
+    def _check_backend(self) -> None:
+        """Check if required deep learning backend is available."""
+        if self.backend == "keras":
+            try:
+                import tensorflow as tf
+                from tensorflow import keras
+                # Set random seed for reproducibility
+                tf.random.set_seed(self.random_state)
+                np.random.seed(self.random_state)
+            except ImportError:
+                raise ImportError(
+                    "EntityEmbeddingsEncoder with backend='keras' requires TensorFlow. "
+                    "Install with: pip install tensorflow"
+                )
+        elif self.backend == "pytorch":
+            try:
+                import torch
+                # Set random seed
+                torch.manual_seed(self.random_state)
+                np.random.seed(self.random_state)
+            except ImportError:
+                raise ImportError(
+                    "EntityEmbeddingsEncoder with backend='pytorch' requires PyTorch. "
+                    "Install with: pip install torch"
+                )
+        else:
+            raise ValueError(f"Unknown backend: '{self.backend}'. Use 'keras' or 'pytorch'.")
+    
+    def _prepare_data(self, X: pd.DataFrame, y: pd.Series) -> tuple:
+        """Prepare data for neural network training.
+        
+        Args:
+            X: Input features
+            y: Target variable
+            
+        Returns:
+            (encoded_X_dict, y_array, task)
+        """
+        df = pd.DataFrame(X).copy()
+        y_series = pd.Series(y).reset_index(drop=True)
+        
+        self.columns_ = self.cols if self.cols else list(df.columns)
+        df = df[self.columns_].astype(str).reset_index(drop=True)
+        
+        # Infer task
+        if self.task:
+            task = self.task
+        else:
+            nunique = y_series.nunique()
+            task = "classification" if nunique <= 20 else "regression"
+        
+        self._fitted_task = task
+        
+        # Encode categorical features to integers
+        encoded_dict = {}
+        for col in self.columns_:
+            # Get unique categories and assign integer IDs
+            unique_cats = df[col].unique()
+            n_categories = len(unique_cats)
+            
+            # Create mapping: category -> integer ID
+            self.category_maps_[col] = {cat: idx for idx, cat in enumerate(unique_cats)}
+            
+            # Determine embedding dimension
+            if self.embedding_dim is not None:
+                emb_dim = self.embedding_dim
+            else:
+                # Auto: min(50, cardinality // 2), with minimum of 2
+                emb_dim = max(2, min(50, n_categories // 2))
+            
+            self.embedding_dims_[col] = emb_dim
+            
+            # Map categories to integer IDs
+            encoded_dict[col] = df[col].map(self.category_maps_[col]).values
+        
+        # Prepare target
+        if task == "classification":
+            # Convert to integer labels
+            from sklearn.preprocessing import LabelEncoder
+            le = LabelEncoder()
+            y_array = le.fit_transform(y_series)
+            self._label_encoder = le
+            self._n_classes = len(le.classes_)
+        else:
+            # Regression - normalize target
+            y_array = y_series.astype(float).values
+            y_mean = y_array.mean()
+            y_std = y_array.std() + 1e-8
+            y_array = (y_array - y_mean) / y_std
+            self._y_mean = y_mean
+            self._y_std = y_std
+        
+        return encoded_dict, y_array, task
+    
+    def _build_keras_model(self, n_samples: int) -> Any:
+        """Build Keras neural network model with embeddings.
+        
+        Args:
+            n_samples: Number of training samples
+            
+        Returns:
+            Keras model
+        """
+        from tensorflow import keras
+        from tensorflow.keras import layers
+        
+        # Create input layers and embedding layers for each categorical column
+        inputs = []
+        embeddings = []
+        
+        for col in self.columns_:
+            n_categories = len(self.category_maps_[col])
+            emb_dim = self.embedding_dims_[col]
+            
+            # Input layer for this column
+            input_layer = layers.Input(shape=(1,), name=f"input_{col}")
+            inputs.append(input_layer)
+            
+            # Embedding layer
+            embedding_layer = layers.Embedding(
+                input_dim=n_categories,
+                output_dim=emb_dim,
+                name=f"embedding_{col}"
+            )(input_layer)
+            
+            # Flatten embedding
+            embedding_flat = layers.Flatten()(embedding_layer)
+            embeddings.append(embedding_flat)
+            
+            # Store embedding layer for later extraction
+            self._embedding_layers_[col] = f"embedding_{col}"
+        
+        # Concatenate all embeddings
+        if len(embeddings) > 1:
+            concatenated = layers.Concatenate()(embeddings)
+        else:
+            concatenated = embeddings[0]
+        
+        # Add dense hidden layers
+        x = concatenated
+        for hidden_dim in self.hidden_dims:
+            x = layers.Dense(hidden_dim, activation='relu')(x)
+            if self.dropout > 0:
+                x = layers.Dropout(self.dropout)(x)
+        
+        # Output layer
+        if self._fitted_task == "classification":
+            if self._n_classes == 2:
+                # Binary classification
+                output = layers.Dense(1, activation='sigmoid', name='output')(x)
+                loss = 'binary_crossentropy'
+                metrics = ['accuracy']
+            else:
+                # Multiclass classification
+                output = layers.Dense(self._n_classes, activation='softmax', name='output')(x)
+                loss = 'sparse_categorical_crossentropy'
+                metrics = ['accuracy']
+        else:
+            # Regression
+            output = layers.Dense(1, activation='linear', name='output')(x)
+            loss = 'mse'
+            metrics = ['mae']
+        
+        # Build model
+        model = keras.Model(inputs=inputs, outputs=output)
+        
+        # Compile model
+        optimizer = keras.optimizers.Adam(learning_rate=self.learning_rate)
+        model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+        
+        if self.verbose >= 2:
+            model.summary()
+        
+        return model
+    
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "EntityEmbeddingsEncoder":
+        """Fit encoder by training neural network with embeddings.
+        
+        Args:
+            X: Training features
+            y: Training target
+            
+        Returns:
+            Self
+        """
+        self._check_backend()
+        
+        # Prepare data
+        encoded_dict, y_array, task = self._prepare_data(X, y)
+        
+        if self.backend == "keras":
+            # Build Keras model
+            self.model_ = self._build_keras_model(len(y_array))
+            
+            # Prepare input format for Keras
+            X_list = [encoded_dict[col].reshape(-1, 1) for col in self.columns_]
+            
+            # Setup callbacks
+            callbacks = []
+            if self.early_stopping_patience is not None:
+                from tensorflow.keras.callbacks import EarlyStopping
+                early_stop = EarlyStopping(
+                    monitor='val_loss',
+                    patience=self.early_stopping_patience,
+                    restore_best_weights=True,
+                    verbose=self.verbose
+                )
+                callbacks.append(early_stop)
+            
+            # Train model
+            self.model_.fit(
+                X_list,
+                y_array,
+                epochs=self.epochs,
+                batch_size=self.batch_size,
+                validation_split=self.validation_split,
+                callbacks=callbacks,
+                verbose=self.verbose
+            )
+            
+            # Extract learned embeddings
+            for col in self.columns_:
+                emb_layer_name = self._embedding_layers_[col]
+                emb_layer = self.model_.get_layer(emb_layer_name)
+                emb_weights = emb_layer.get_weights()[0]  # Shape: (n_categories, embedding_dim)
+                self.embeddings_[col] = emb_weights
+        
+        elif self.backend == "pytorch":
+            # PyTorch implementation
+            raise NotImplementedError(
+                "PyTorch backend for EntityEmbeddingsEncoder is not yet implemented. "
+                "Use backend='keras' instead."
+            )
+        
+        logger.info(
+            f"Trained EntityEmbeddingsEncoder on {len(self.columns_)} columns "
+            f"with embedding dims: {self.embedding_dims_}"
+        )
+        return self
+    
+    def fit_transform(self, X: pd.DataFrame, y: pd.Series) -> np.ndarray:
+        """Fit encoder and transform training data.
+        
+        Args:
+            X: Training features
+            y: Training target
+            
+        Returns:
+            Embedded features (n_samples, sum of embedding dimensions)
+        """
+        self.fit(X, y)
+        return self.transform(X)
+    
+    def transform(self, X: pd.DataFrame, y: Optional[pd.Series] = None) -> np.ndarray:
+        """Transform using learned embeddings.
+        
+        Args:
+            X: Features to encode
+            y: Target (should be None to prevent leakage)
+            
+        Returns:
+            Embedded features (n_samples, sum of embedding dimensions)
+        """
+        # CRITICAL: Enforce leakage guard
+        self.ensure_no_target_in_transform(y)
+        
+        if not self.embeddings_:
+            raise RuntimeError("EntityEmbeddingsEncoder not fitted. Call fit() first.")
+        
+        df = pd.DataFrame(X).copy()
+        df = df[self.columns_].astype(str)
+        
+        # Map categories to embeddings
+        out = []
+        for col in self.columns_:
+            category_map = self.category_maps_[col]
+            embeddings = self.embeddings_[col]
+            
+            # Map each category to its embedding vector
+            col_embeddings = []
+            for val in df[col]:
+                if val in category_map:
+                    cat_id = category_map[val]
+                    emb_vec = embeddings[cat_id]
+                else:
+                    # Unknown category - use zeros
+                    emb_vec = np.zeros(self.embedding_dims_[col])
+                col_embeddings.append(emb_vec)
+            
+            col_embeddings = np.array(col_embeddings)  # Shape: (n_samples, embedding_dim)
+            out.append(col_embeddings)
+        
+        return np.hstack(out)
+    
+    def get_embeddings(self) -> dict[str, np.ndarray]:
+        """Get learned embedding matrices for each column.
+        
+        Returns:
+            Dict mapping column → embedding matrix (n_categories, embedding_dim)
+        """
+        if not self.embeddings_:
+            raise RuntimeError("EntityEmbeddingsEncoder not fitted. Call fit() first.")
+        return self.embeddings_.copy()
+    
+    def get_feature_names_out(self, input_features: Optional[list[str]] = None) -> list[str]:
+        """Get output feature names for embedded features.
+        
+        Args:
+            input_features: Input feature names (unused)
+            
+        Returns:
+            List of embedding feature names
+        """
+        names = []
+        for col in self.columns_:
+            emb_dim = self.embedding_dims_.get(col, 0)
+            for dim_idx in range(emb_dim):
+                names.append(f"emb_{col}_{dim_idx}")
+        return names

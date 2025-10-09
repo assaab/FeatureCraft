@@ -555,23 +555,30 @@ class CategoricalNumericInteractions(BaseEstimator, TransformerMixin):
             
             stats = self.group_stats_[group_key]
             
+            # Collect new columns in a dictionary to avoid DataFrame fragmentation
+            new_columns = {}
+
             # Map group statistics
             if self.strategy in ['group_stats', 'both']:
-                out[f"{cat_col}_{num_col}_mean"] = df[cat_col].map(stats['mean'])
-                out[f"{cat_col}_{num_col}_std"] = df[cat_col].map(stats['std'])
-                out[f"{cat_col}_{num_col}_min"] = df[cat_col].map(stats['min'])
-                out[f"{cat_col}_{num_col}_max"] = df[cat_col].map(stats['max'])
-            
+                new_columns[f"{cat_col}_{num_col}_mean"] = df[cat_col].map(stats['mean'])
+                new_columns[f"{cat_col}_{num_col}_std"] = df[cat_col].map(stats['std'])
+                new_columns[f"{cat_col}_{num_col}_min"] = df[cat_col].map(stats['min'])
+                new_columns[f"{cat_col}_{num_col}_max"] = df[cat_col].map(stats['max'])
+
             # Compute deviations
             if self.strategy in ['deviation', 'both']:
                 group_mean = df[cat_col].map(stats['mean'])
                 group_std = df[cat_col].map(stats['std']).replace(0, 1)  # Avoid division by zero
-                
+
                 # Standardized deviation
-                out[f"{cat_col}_{num_col}_deviation"] = (df[num_col] - group_mean) / group_std
-                
+                new_columns[f"{cat_col}_{num_col}_deviation"] = (df[num_col] - group_mean) / group_std
+
                 # Raw deviation
-                out[f"{cat_col}_{num_col}_diff"] = df[num_col] - group_mean
+                new_columns[f"{cat_col}_{num_col}_diff"] = df[num_col] - group_mean
+
+            # Add all new columns at once using concat to avoid fragmentation
+            if new_columns:
+                out = pd.concat([out, pd.DataFrame(new_columns, index=df.index)], axis=1)
         
         self.feature_names_ = list(out.columns)
         return out

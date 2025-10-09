@@ -263,7 +263,7 @@ class SkewedPowerTransformer(BaseEstimator, TransformerMixin):
         self.cols_to_tx_: list[int] = []
         self.n_features_in_: int = 0
 
-    def fit(self, X: pd.DataFrame, y=None) -> SkewedPowerTransformer:
+    def fit(self, X: pd.DataFrame, y=None) -> "SkewedPowerTransformer":
         """Fit transformer."""
         # Handle both DataFrame and array inputs dynamically
         if isinstance(X, pd.DataFrame):
@@ -302,6 +302,807 @@ class SkewedPowerTransformer(BaseEstimator, TransformerMixin):
             tx = self.pt_.transform(df.iloc[:, self.cols_to_tx_])
             df.iloc[:, self.cols_to_tx_] = tx
         return df.values
+
+
+class LogTransformer(BaseEstimator, TransformerMixin):
+    """Apply log transform: log(x + shift).
+    
+    Suitable for right-skewed distributions with exponential growth patterns.
+    Requires x > 0 after shift. Use log1p for data with zeros.
+    """
+    
+    def __init__(
+        self, 
+        columns: Sequence[str] | None = None,
+        shift: float = 1e-5,
+        base: str = "natural",
+    ) -> None:
+        """Initialize log transformer.
+        
+        Args:
+            columns: Columns to transform (None = all numeric)
+            shift: Value to add before log to handle zeros: log(x + shift)
+            base: Logarithm base - 'natural' (ln), '10', '2'
+        """
+        self.columns = columns
+        self.shift = shift
+        self.base = base
+        self.columns_: list[str] = []
+        self.min_values_: dict[str, float] = {}
+    
+    def fit(self, X: pd.DataFrame, y=None) -> "LogTransformer":
+        """Fit transformer by validating data ranges."""
+        df = pd.DataFrame(X)
+        
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        # Check minimum values to ensure x + shift > 0
+        for col in self.columns_:
+            min_val = df[col].min()
+            self.min_values_[col] = float(min_val)
+            
+            if min_val + self.shift <= 0:
+                raise ValueError(
+                    f"Column '{col}' has minimum value {min_val}, which with shift={self.shift} "
+                    f"gives {min_val + self.shift} <= 0. Log requires positive values. "
+                    f"Use log1p transform or increase shift parameter."
+                )
+        
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply log transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            # Apply shift and log
+            shifted = df[col] + self.shift
+            
+            if self.base == "natural":
+                df[col] = np.log(shifted)
+            elif self.base == "10":
+                df[col] = np.log10(shifted)
+            elif self.base == "2":
+                df[col] = np.log2(shifted)
+            else:
+                raise ValueError(f"Unknown base: {self.base}. Use 'natural', '10', or '2'.")
+        
+        return df
+    
+    def inverse_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Reverse the log transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            if self.base == "natural":
+                df[col] = np.exp(df[col]) - self.shift
+            elif self.base == "10":
+                df[col] = np.power(10, df[col]) - self.shift
+            elif self.base == "2":
+                df[col] = np.power(2, df[col]) - self.shift
+        
+        return df
+
+
+class Log1pTransformer(BaseEstimator, TransformerMixin):
+    """Apply log1p transform: log(1 + x).
+    
+    Handles zeros naturally without requiring a shift parameter.
+    Suitable for count data and non-negative features with right skew.
+    Requires x >= 0.
+    """
+    
+    def __init__(self, columns: Sequence[str] | None = None) -> None:
+        """Initialize log1p transformer.
+        
+        Args:
+            columns: Columns to transform (None = all numeric)
+        """
+        self.columns = columns
+        self.columns_: list[str] = []
+        self.min_values_: dict[str, float] = {}
+    
+    def fit(self, X: pd.DataFrame, y=None) -> "Log1pTransformer":
+        """Fit transformer by validating data ranges."""
+        df = pd.DataFrame(X)
+        
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        # Validate x >= 0
+        for col in self.columns_:
+            min_val = df[col].min()
+            self.min_values_[col] = float(min_val)
+            
+            if min_val < 0:
+                raise ValueError(
+                    f"Column '{col}' has minimum value {min_val} < 0. "
+                    f"log1p requires non-negative values. Consider using log with shift or yeo-johnson."
+                )
+        
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply log1p transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            df[col] = np.log1p(df[col])
+        
+        return df
+    
+    def inverse_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Reverse the log1p transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            df[col] = np.expm1(df[col])
+        
+        return df
+
+
+class SqrtTransformer(BaseEstimator, TransformerMixin):
+    """Apply square root transform: √x.
+    
+    Suitable for moderate skewness and count data.
+    Handles negatives based on strategy: abs, clip, or error.
+    """
+    
+    def __init__(
+        self, 
+        columns: Sequence[str] | None = None,
+        handle_negatives: str = "abs",
+    ) -> None:
+        """Initialize sqrt transformer.
+        
+        Args:
+            columns: Columns to transform (None = all numeric)
+            handle_negatives: Strategy for negative values:
+                - 'abs': sqrt(abs(x)) * sign(x) (signed square root)
+                - 'clip': Set negative values to 0
+                - 'error': Raise error if negatives found
+        """
+        self.columns = columns
+        self.handle_negatives = handle_negatives
+        self.columns_: list[str] = []
+        self.has_negatives_: dict[str, bool] = {}
+    
+    def fit(self, X: pd.DataFrame, y=None) -> "SqrtTransformer":
+        """Fit transformer by checking for negative values."""
+        df = pd.DataFrame(X)
+        
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        for col in self.columns_:
+            has_neg = (df[col] < 0).any()
+            self.has_negatives_[col] = bool(has_neg)
+            
+            if has_neg and self.handle_negatives == "error":
+                raise ValueError(
+                    f"Column '{col}' contains negative values. "
+                    f"sqrt requires non-negative values unless handle_negatives='abs' or 'clip'."
+                )
+        
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply square root transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            if self.handle_negatives == "abs":
+                # Signed square root: sqrt(abs(x)) * sign(x)
+                df[col] = np.sqrt(np.abs(df[col])) * np.sign(df[col])
+            elif self.handle_negatives == "clip":
+                # Clip negatives to 0, then sqrt
+                df[col] = np.sqrt(np.maximum(df[col], 0))
+            else:  # error
+                df[col] = np.sqrt(df[col])
+        
+        return df
+    
+    def inverse_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Reverse the square root transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            if self.handle_negatives == "abs":
+                # Reverse signed square root: x² * sign(x)
+                df[col] = np.square(df[col]) * np.sign(df[col])
+            else:
+                df[col] = np.square(df[col])
+        
+        return df
+
+
+class ReciprocalTransformer(BaseEstimator, TransformerMixin):
+    """Apply reciprocal transform: 1/x.
+    
+    Suitable for heavy right-tailed distributions.
+    Adds small epsilon to prevent division by zero: 1/(x + epsilon).
+    """
+    
+    def __init__(
+        self, 
+        columns: Sequence[str] | None = None,
+        epsilon: float = 1e-10,
+    ) -> None:
+        """Initialize reciprocal transformer.
+        
+        Args:
+            columns: Columns to transform (None = all numeric)
+            epsilon: Small value to add to prevent division by zero: 1/(x + epsilon)
+        """
+        self.columns = columns
+        self.epsilon = epsilon
+        self.columns_: list[str] = []
+    
+    def fit(self, X: pd.DataFrame, y=None) -> "ReciprocalTransformer":
+        """Fit transformer."""
+        df = pd.DataFrame(X)
+        
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply reciprocal transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            # Add epsilon to avoid division by zero
+            df[col] = 1.0 / (df[col] + self.epsilon)
+        
+        return df
+    
+    def inverse_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Reverse the reciprocal transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            # Reverse: 1/y - epsilon
+            df[col] = 1.0 / df[col] - self.epsilon
+        
+        return df
+
+
+class BoxCoxTransformer(BaseEstimator, TransformerMixin):
+    """Apply Box-Cox transform: (x^λ - 1) / λ.
+    
+    Optimal λ is estimated to maximize normality (Gaussian likelihood).
+    Requires x > 0 (strictly positive values).
+    For data with zeros or negatives, use Yeo-Johnson instead.
+    """
+    
+    def __init__(
+        self, 
+        columns: Sequence[str] | None = None,
+        lambda_value: float | None = None,
+    ) -> None:
+        """Initialize Box-Cox transformer.
+        
+        Args:
+            columns: Columns to transform (None = all numeric)
+            lambda_value: Fixed lambda value (None = optimize automatically)
+        """
+        self.columns = columns
+        self.lambda_value = lambda_value
+        self.columns_: list[str] = []
+        self.lambda_values_: dict[str, float] = {}
+        self.pt_: PowerTransformer | None = None
+    
+    def fit(self, X: pd.DataFrame, y=None) -> "BoxCoxTransformer":
+        """Fit transformer by optimizing lambda."""
+        df = pd.DataFrame(X)
+        
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        # Validate x > 0 for all columns
+        for col in self.columns_:
+            min_val = df[col].min()
+            if min_val <= 0:
+                raise ValueError(
+                    f"Column '{col}' has minimum value {min_val} <= 0. "
+                    f"Box-Cox requires strictly positive values. Use Yeo-Johnson for data with zeros/negatives."
+                )
+        
+        # Fit PowerTransformer with box-cox method
+        self.pt_ = PowerTransformer(method="box-cox", standardize=False)
+        self.pt_.fit(df[self.columns_])
+        
+        # Store learned lambda values
+        if hasattr(self.pt_, 'lambdas_'):
+            for i, col in enumerate(self.columns_):
+                self.lambda_values_[col] = float(self.pt_.lambdas_[i])
+        
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply Box-Cox transform."""
+        df = pd.DataFrame(X).copy()
+        
+        if self.pt_ is None:
+            return df
+        
+        # Transform
+        transformed = self.pt_.transform(df[self.columns_])
+        df[self.columns_] = transformed
+        
+        return df
+    
+    def inverse_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Reverse the Box-Cox transform."""
+        df = pd.DataFrame(X).copy()
+        
+        if self.pt_ is None:
+            return df
+        
+        # Inverse transform
+        inverse = self.pt_.inverse_transform(df[self.columns_])
+        df[self.columns_] = inverse
+        
+        return df
+
+
+class ExponentialTransformer(BaseEstimator, TransformerMixin):
+    """Apply exponential transforms: e^x, x², x³, etc.
+    
+    Suitable for left-skewed distributions (rare use case).
+    Use with caution as exponential transforms can create very large values.
+    """
+    
+    def __init__(
+        self, 
+        columns: Sequence[str] | None = None,
+        transform_type: str = "square",
+        clip_max: float | None = None,
+    ) -> None:
+        """Initialize exponential transformer.
+        
+        Args:
+            columns: Columns to transform (None = all numeric)
+            transform_type: Type of transform - 'square' (x²), 'cube' (x³), 'exp' (e^x)
+            clip_max: Maximum value to clip after transform (None = no clipping)
+        """
+        self.columns = columns
+        self.transform_type = transform_type
+        self.clip_max = clip_max
+        self.columns_: list[str] = []
+    
+    def fit(self, X: pd.DataFrame, y=None) -> "ExponentialTransformer":
+        """Fit transformer."""
+        df = pd.DataFrame(X)
+        
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        # Warn if exp transform might create very large values
+        if self.transform_type == "exp":
+            for col in self.columns_:
+                max_val = df[col].max()
+                if max_val > 10:
+                    from .logging import get_logger
+                    logger = get_logger(__name__)
+                    logger.warning(
+                        f"Column '{col}' has max value {max_val}. "
+                        f"exp({max_val}) = {np.exp(max_val):.2e} may cause overflow. "
+                        f"Consider using clip_max parameter or scaling before exponential transform."
+                    )
+        
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply exponential transform."""
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            if self.transform_type == "square":
+                df[col] = np.square(df[col])
+            elif self.transform_type == "cube":
+                df[col] = np.power(df[col], 3)
+            elif self.transform_type == "exp":
+                df[col] = np.exp(df[col])
+            else:
+                raise ValueError(
+                    f"Unknown transform_type: '{self.transform_type}'. "
+                    f"Use 'square', 'cube', or 'exp'."
+                )
+            
+            # Optional clipping
+            if self.clip_max is not None:
+                df[col] = np.clip(df[col], -self.clip_max, self.clip_max)
+        
+        return df
+
+
+class MathematicalTransformer(BaseEstimator, TransformerMixin):
+    """Unified mathematical transformer with intelligent auto-selection.
+    
+    Automatically selects the optimal mathematical transform per column based on:
+    - Data range (positivity, zeros, negatives)
+    - Skewness magnitude and direction
+    - Kurtosis (tail heaviness)
+    - Data characteristics (count data, continuous, etc.)
+    
+    Supports: log, log1p, sqrt, box-cox, yeo-johnson, reciprocal, exponential, none
+    """
+    
+    def __init__(
+        self,
+        columns: Sequence[str] | None = None,
+        strategy: str = "auto",
+        log_shift: float = 1e-5,
+        sqrt_handle_negatives: str = "abs",
+        reciprocal_epsilon: float = 1e-10,
+        exponential_type: str = "square",
+        boxcox_lambda: float | None = None,
+        skew_threshold: float = 1.0,
+    ) -> None:
+        """Initialize mathematical transformer with unified interface.
+        
+        Args:
+            columns: Columns to transform (None = all numeric)
+            strategy: Transform strategy:
+                - 'auto': Intelligently select best transform per column
+                - 'log': log(x + shift)
+                - 'log1p': log(1 + x)
+                - 'sqrt': sqrt(x)
+                - 'box_cox': Box-Cox with optimized lambda
+                - 'yeo_johnson': Yeo-Johnson (handles negatives)
+                - 'reciprocal': 1/(x + epsilon)
+                - 'exponential': x², x³, or e^x
+                - 'none': No transformation
+            log_shift: Shift value for log transform
+            sqrt_handle_negatives: How to handle negatives in sqrt (abs, clip, error)
+            reciprocal_epsilon: Epsilon for reciprocal to prevent division by zero
+            exponential_type: Type of exponential (square, cube, exp)
+            boxcox_lambda: Fixed lambda for Box-Cox (None = optimize)
+            skew_threshold: Skewness threshold for triggering transforms in auto mode
+        """
+        self.columns = columns
+        self.strategy = strategy
+        self.log_shift = log_shift
+        self.sqrt_handle_negatives = sqrt_handle_negatives
+        self.reciprocal_epsilon = reciprocal_epsilon
+        self.exponential_type = exponential_type
+        self.boxcox_lambda = boxcox_lambda
+        self.skew_threshold = skew_threshold
+        
+        # Fitted attributes
+        self.columns_: list[str] = []
+        self.transformers_: dict[str, BaseEstimator] = {}
+        self.strategies_: dict[str, str] = {}
+        self.skewness_: dict[str, float] = {}
+        self.data_stats_: dict[str, dict] = {}
+    
+    def fit(self, X: pd.DataFrame, y=None) -> "MathematicalTransformer":
+        """Fit transformer by analyzing data and selecting optimal transforms.
+        
+        Args:
+            X: Input DataFrame
+            y: Target (unused, for sklearn compatibility)
+            
+        Returns:
+            Self
+        """
+        df = pd.DataFrame(X)
+        
+        # Determine columns to transform
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        # Analyze each column and select transform
+        for col in self.columns_:
+            col_data = df[col].dropna()
+            
+            if len(col_data) == 0:
+                # No valid data - skip transformation
+                self.strategies_[col] = "none"
+                self.transformers_[col] = None
+                continue
+            
+            # Compute statistics for auto-selection
+            stats = self._compute_column_stats(col_data)
+            self.data_stats_[col] = stats
+            self.skewness_[col] = stats['skewness']
+            
+            # Select strategy for this column
+            if self.strategy == "auto":
+                selected_strategy = self._auto_select_strategy(col_data, stats)
+            else:
+                selected_strategy = self.strategy
+            
+            self.strategies_[col] = selected_strategy
+            
+            # Create and fit transformer for this column
+            transformer = self._create_transformer(col, selected_strategy)
+            if transformer is not None:
+                try:
+                    transformer.fit(df[[col]], y)
+                    self.transformers_[col] = transformer
+                except Exception as e:
+                    # Fallback to no transform if fitting fails
+                    from .logging import get_logger
+                    logger = get_logger(__name__)
+                    logger.warning(
+                        f"Failed to fit {selected_strategy} transform for column '{col}': {e}. "
+                        f"Skipping transformation for this column."
+                    )
+                    self.strategies_[col] = "none"
+                    self.transformers_[col] = None
+            else:
+                self.transformers_[col] = None
+        
+        return self
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply selected transforms to data.
+        
+        Args:
+            X: Input DataFrame
+            
+        Returns:
+            Transformed DataFrame
+        """
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                continue
+            
+            transformer = self.transformers_.get(col)
+            if transformer is not None:
+                try:
+                    df[[col]] = transformer.transform(df[[col]])
+                except Exception as e:
+                    # Log warning but continue
+                    from .logging import get_logger
+                    logger = get_logger(__name__)
+                    logger.warning(
+                        f"Transform failed for column '{col}' with {self.strategies_[col]}: {e}. "
+                        f"Leaving column unchanged."
+                    )
+        
+        return df
+    
+    def _compute_column_stats(self, series: pd.Series) -> dict:
+        """Compute comprehensive statistics for a column.
+        
+        Args:
+            series: Column data (without NaNs)
+            
+        Returns:
+            Dict with statistics
+        """
+        stats = {}
+        
+        # Basic statistics
+        stats['min'] = float(series.min())
+        stats['max'] = float(series.max())
+        stats['mean'] = float(series.mean())
+        stats['std'] = float(series.std())
+        
+        # Distribution shape
+        try:
+            stats['skewness'] = float(series.skew())
+        except:
+            stats['skewness'] = 0.0
+        
+        try:
+            stats['kurtosis'] = float(series.kurtosis())
+        except:
+            stats['kurtosis'] = 0.0
+        
+        # Data characteristics
+        stats['has_zeros'] = (series == 0).any()
+        stats['has_negatives'] = (series < 0).any()
+        stats['all_positive'] = (series > 0).all()
+        stats['all_nonnegative'] = (series >= 0).all()
+        
+        # Count characteristics (useful for log1p)
+        stats['all_integers'] = series.apply(lambda x: float(x).is_integer()).all()
+        stats['looks_like_counts'] = stats['all_nonnegative'] and stats['all_integers']
+        
+        # Percentage of zeros (useful for log1p vs log)
+        stats['zero_percentage'] = float((series == 0).mean())
+        
+        return stats
+    
+    def _auto_select_strategy(self, series: pd.Series, stats: dict) -> str:
+        """Intelligently select the best transform strategy.
+        
+        Decision tree for transform selection:
+        1. Check if transformation is needed (low skewness → none)
+        2. Check data constraints (negatives, zeros)
+        3. Select optimal transform based on distribution shape
+        
+        Args:
+            series: Column data
+            stats: Pre-computed statistics
+            
+        Returns:
+            Strategy name
+        """
+        skew = abs(stats['skewness'])
+        
+        # RULE 1: Low skewness → No transform needed
+        if skew < self.skew_threshold:
+            return "none"
+        
+        # RULE 2: Negatives present → Yeo-Johnson (most flexible)
+        if stats['has_negatives']:
+            return "yeo_johnson"
+        
+        # RULE 3: Count data with zeros → log1p (natural choice)
+        if stats['looks_like_counts'] and stats['has_zeros']:
+            return "log1p"
+        
+        # RULE 4: Strictly positive data → Box-Cox or log
+        if stats['all_positive']:
+            # Box-Cox is more flexible but slower
+            # Use log for very high skewness (>3), Box-Cox for moderate (1-3)
+            if skew > 3.0:
+                return "log"
+            else:
+                return "box_cox"
+        
+        # RULE 5: Non-negative with few zeros → log1p
+        if stats['all_nonnegative']:
+            if stats['zero_percentage'] < 0.1:  # Less than 10% zeros
+                return "log1p"
+            else:
+                return "log1p"  # Still works with many zeros
+        
+        # RULE 6: Heavy right tail → reciprocal
+        if stats['kurtosis'] > 10 and skew > 2:
+            return "reciprocal"
+        
+        # RULE 7: Moderate skewness, non-negative → sqrt
+        if stats['all_nonnegative'] and 1 <= skew < 3:
+            return "sqrt"
+        
+        # RULE 8: Fallback to Yeo-Johnson (handles everything)
+        return "yeo_johnson"
+    
+    def _create_transformer(self, col_name: str, strategy: str) -> BaseEstimator | None:
+        """Create transformer instance for a specific strategy.
+        
+        Args:
+            col_name: Column name
+            strategy: Transform strategy
+            
+        Returns:
+            Transformer instance or None
+        """
+        if strategy == "none":
+            return None
+        
+        elif strategy == "log":
+            return LogTransformer(
+                columns=[col_name],
+                shift=self.log_shift,
+                base="natural",
+            )
+        
+        elif strategy == "log1p":
+            return Log1pTransformer(columns=[col_name])
+        
+        elif strategy == "sqrt":
+            return SqrtTransformer(
+                columns=[col_name],
+                handle_negatives=self.sqrt_handle_negatives,
+            )
+        
+        elif strategy == "box_cox":
+            return BoxCoxTransformer(
+                columns=[col_name],
+                lambda_value=self.boxcox_lambda,
+            )
+        
+        elif strategy == "yeo_johnson":
+            # Use sklearn's PowerTransformer directly (wrapped for consistency)
+            from sklearn.preprocessing import PowerTransformer as SKLearnPT
+            # Create a simple wrapper
+            class YeoJohnsonWrapper(BaseEstimator, TransformerMixin):
+                def __init__(self, columns):
+                    self.columns = columns
+                    self.pt_ = SKLearnPT(method="yeo-johnson", standardize=False)
+                
+                def fit(self, X, y=None):
+                    self.pt_.fit(X[self.columns])
+                    return self
+                
+                def transform(self, X):
+                    df = X.copy()
+                    df[self.columns] = self.pt_.transform(X[self.columns])
+                    return df
+            
+            return YeoJohnsonWrapper(columns=[col_name])
+        
+        elif strategy == "reciprocal":
+            return ReciprocalTransformer(
+                columns=[col_name],
+                epsilon=self.reciprocal_epsilon,
+            )
+        
+        elif strategy == "exponential":
+            return ExponentialTransformer(
+                columns=[col_name],
+                transform_type=self.exponential_type,
+            )
+        
+        else:
+            from .logging import get_logger
+            logger = get_logger(__name__)
+            logger.warning(f"Unknown strategy '{strategy}' for column '{col_name}'. Skipping transformation.")
+            return None
+    
+    def get_strategies(self) -> dict[str, str]:
+        """Get selected strategies per column.
+        
+        Returns:
+            Dict mapping column names to selected strategies
+        """
+        return self.strategies_.copy()
+    
+    def get_skewness(self) -> dict[str, float]:
+        """Get computed skewness values per column.
+        
+        Returns:
+            Dict mapping column names to skewness values
+        """
+        return self.skewness_.copy()
+    
+    def get_data_stats(self) -> dict[str, dict]:
+        """Get comprehensive data statistics per column.
+        
+        Returns:
+            Dict mapping column names to statistics dicts
+        """
+        return {k: v.copy() for k, v in self.data_stats_.items()}
 
 
 class CategoricalMissingIndicator(BaseEstimator, TransformerMixin):
@@ -528,6 +1329,543 @@ class WinsorizerTransformer(BaseEstimator, TransformerMixin):
                 )
         
         return df
+
+
+class BinningTransformer(BaseEstimator, TransformerMixin):
+    """Comprehensive binning/discretization transformer supporting multiple strategies.
+    
+    Converts continuous features into discrete bins using various strategies:
+    - equal_width: Fixed-width intervals (uniform distribution)
+    - equal_frequency: Quantile-based bins (equal sample counts)
+    - kmeans: Cluster-based bins (data-driven boundaries)
+    - decision_tree: Supervised binning (target-aware boundaries)
+    - custom: User-defined bin edges
+    
+    This enables linear models to learn non-linear patterns and threshold effects.
+    """
+    
+    def __init__(
+        self,
+        columns: list[str] | None = None,
+        strategy: str = "equal_width",
+        n_bins: int = 5,
+        encode: str = "ordinal",
+        custom_bins: dict[str, list[float]] | None = None,
+        handle_unknown: str = "ignore",
+        handle_invalid: str = "ignore",
+        subsample: int | None = 200_000,
+        random_state: int = 42,
+    ) -> None:
+        """Initialize binning transformer.
+        
+        Args:
+            columns: Columns to bin (None = all numeric)
+            strategy: Binning strategy - 'equal_width', 'equal_frequency', 'kmeans', 
+                     'decision_tree', 'custom'
+            n_bins: Number of bins (ignored for custom strategy)
+            encode: Output encoding - 'ordinal' (0, 1, 2...) or 'onehot'
+            custom_bins: Dict mapping column names to bin edges (for custom strategy)
+            handle_unknown: How to handle values outside bin range - 'ignore' or 'error'
+            handle_invalid: How to handle invalid values (inf, large values) - 'ignore' or 'error'
+            subsample: Subsample size for kmeans/decision_tree (None = use all data)
+            random_state: Random seed for kmeans/decision_tree
+        """
+        self.columns = columns
+        self.strategy = strategy
+        self.n_bins = n_bins
+        self.encode = encode
+        self.custom_bins = custom_bins
+        self.handle_unknown = handle_unknown
+        self.handle_invalid = handle_invalid
+        self.subsample = subsample
+        self.random_state = random_state
+        
+        # Fitted attributes
+        self.columns_: list[str] = []
+        self.bin_edges_: dict[str, np.ndarray] = {}
+        self.bin_labels_: dict[str, list[str]] = {}
+        self.n_bins_: dict[str, int] = {}
+        
+    def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> "BinningTransformer":
+        """Fit binning transformer by computing bin edges.
+        
+        Args:
+            X: Input DataFrame
+            y: Target Series (required for decision_tree strategy)
+            
+        Returns:
+            Self
+        """
+        df = pd.DataFrame(X)
+        
+        # Determine columns to bin
+        if self.columns is None:
+            # Auto-detect numeric columns
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        # Compute bin edges for each column
+        for col in self.columns_:
+            self.bin_edges_[col], self.n_bins_[col] = self._compute_bin_edges(
+                df[col], col, y
+            )
+            # Generate labels for bins
+            self.bin_labels_[col] = self._generate_bin_labels(col, self.n_bins_[col])
+        
+        return self
+    
+    def _compute_bin_edges(
+        self, 
+        series: pd.Series, 
+        col_name: str,
+        y: pd.Series | None = None
+    ) -> tuple[np.ndarray, int]:
+        """Compute bin edges for a single column based on strategy.
+        
+        Args:
+            series: Input series to bin
+            col_name: Column name (for custom bins lookup)
+            y: Target series (for supervised binning)
+            
+        Returns:
+            Tuple of (bin_edges, n_bins)
+        """
+        # Clean data: remove NaN and infinite values
+        clean_data = series.replace([np.inf, -np.inf], np.nan).dropna()
+        
+        if len(clean_data) == 0:
+            # No valid data - return dummy edges
+            return np.array([0, 1]), 1
+        
+        # Convert to numpy array
+        X_col = clean_data.values
+        
+        # Subsample if needed (for expensive methods)
+        if self.subsample and len(X_col) > self.subsample:
+            if self.strategy in {'kmeans', 'decision_tree'}:
+                rng = np.random.RandomState(self.random_state)
+                indices = rng.choice(len(X_col), size=self.subsample, replace=False)
+                X_col = X_col[indices]
+                if y is not None:
+                    # Get the corresponding y values for the subsampled indices
+                    clean_indices = clean_data.index[indices]
+                    y_sampled = y.loc[clean_indices]
+                else:
+                    y_sampled = None
+            else:
+                y_sampled = y
+        else:
+            # Use the indices of non-NaN values from the original series
+            clean_indices = clean_data.index
+            y_sampled = y.loc[clean_indices] if y is not None else None
+        
+        # Strategy-specific binning
+        if self.strategy == "equal_width":
+            # Fixed-width intervals
+            min_val, max_val = X_col.min(), X_col.max()
+            if min_val == max_val:
+                # Constant column
+                edges = np.array([min_val - 0.5, max_val + 0.5])
+                return edges, 1
+            edges = np.linspace(min_val, max_val, self.n_bins + 1)
+            return edges, self.n_bins
+        
+        elif self.strategy == "equal_frequency":
+            # Quantile-based bins
+            quantiles = np.linspace(0, 1, self.n_bins + 1)
+            edges = np.percentile(X_col, quantiles * 100)
+            # Remove duplicate edges (happens with discrete/constant data)
+            edges = np.unique(edges)
+            actual_bins = len(edges) - 1
+            return edges, actual_bins
+        
+        elif self.strategy == "kmeans":
+            # Cluster-based binning
+            from sklearn.cluster import KMeans
+            
+            # Reshape for sklearn
+            X_reshaped = X_col.reshape(-1, 1)
+            
+            # Fit KMeans
+            n_bins = min(self.n_bins, len(np.unique(X_col)))
+            kmeans = KMeans(
+                n_clusters=n_bins, 
+                random_state=self.random_state,
+                n_init=10
+            )
+            kmeans.fit(X_reshaped)
+            
+            # Use cluster centers as bin boundaries
+            centers = np.sort(kmeans.cluster_centers_.flatten())
+            
+            # Create edges from centers
+            min_val, max_val = X_col.min(), X_col.max()
+            edges = [min_val]
+            for i in range(len(centers) - 1):
+                # Midpoint between adjacent centers
+                edges.append((centers[i] + centers[i + 1]) / 2)
+            edges.append(max_val)
+            edges = np.array(edges)
+            
+            return edges, len(edges) - 1
+        
+        elif self.strategy == "decision_tree":
+            # Supervised binning using decision tree splits
+            if y_sampled is None:
+                raise ValueError("decision_tree strategy requires y (target) to be provided")
+            
+            from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
+            from sklearn.preprocessing import LabelEncoder
+            
+            # Determine if classification or regression
+            if pd.api.types.is_numeric_dtype(y_sampled):
+                # Check if it's actually classification with numeric labels
+                n_unique = y_sampled.nunique()
+                if n_unique <= 20:  # Heuristic: <= 20 unique values = classification
+                    tree = DecisionTreeClassifier(
+                        max_leaf_nodes=self.n_bins,
+                        random_state=self.random_state
+                    )
+                else:
+                    tree = DecisionTreeRegressor(
+                        max_leaf_nodes=self.n_bins,
+                        random_state=self.random_state
+                    )
+            else:
+                # Categorical target - encode it
+                le = LabelEncoder()
+                y_encoded = le.fit_transform(y_sampled.astype(str))
+                tree = DecisionTreeClassifier(
+                    max_leaf_nodes=self.n_bins,
+                    random_state=self.random_state
+                )
+                y_sampled = pd.Series(y_encoded)
+            
+            # Fit tree
+            X_reshaped = X_col.reshape(-1, 1)
+            tree.fit(X_reshaped, y_sampled)
+            
+            # Extract split thresholds from tree
+            thresholds = []
+            tree_obj = tree.tree_
+            for node_id in range(tree_obj.node_count):
+                if tree_obj.children_left[node_id] != tree_obj.children_right[node_id]:
+                    # Internal node (has split)
+                    thresholds.append(tree_obj.threshold[node_id])
+            
+            if not thresholds:
+                # Tree didn't split - use equal width as fallback
+                min_val, max_val = X_col.min(), X_col.max()
+                edges = np.linspace(min_val, max_val, 3)
+                return edges, 2
+            
+            # Create edges from thresholds
+            thresholds = sorted(thresholds)
+            edges = [X_col.min()] + thresholds + [X_col.max()]
+            edges = np.unique(edges)
+            
+            return edges, len(edges) - 1
+        
+        elif self.strategy == "custom":
+            # User-provided bin edges
+            custom_bins_dict = self.custom_bins if self.custom_bins is not None else {}
+            if col_name not in custom_bins_dict:
+                raise ValueError(
+                    f"Column '{col_name}' not found in custom_bins. "
+                    f"Provide bin edges via custom_bins parameter."
+                )
+            edges = np.array(sorted(custom_bins_dict[col_name]))
+            if len(edges) < 2:
+                raise ValueError(f"custom_bins for '{col_name}' must have at least 2 edges")
+            return edges, len(edges) - 1
+        
+        else:
+            raise ValueError(
+                f"Unknown binning strategy: '{self.strategy}'. "
+                f"Choose from: equal_width, equal_frequency, kmeans, decision_tree, custom"
+            )
+    
+    def _generate_bin_labels(self, col_name: str, n_bins: int) -> list[str]:
+        """Generate human-readable labels for bins.
+        
+        Args:
+            col_name: Column name
+            n_bins: Number of bins
+            
+        Returns:
+            List of bin labels
+        """
+        edges = self.bin_edges_[col_name]
+        labels = []
+        
+        for i in range(n_bins):
+            left = edges[i]
+            right = edges[i + 1]
+            
+            # Format edges nicely
+            if abs(left) < 1000 and abs(right) < 1000:
+                label = f"{col_name}_[{left:.2f},{right:.2f})"
+            else:
+                label = f"{col_name}_[{left:.1e},{right:.1e})"
+            
+            labels.append(label)
+        
+        return labels
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Transform by binning continuous features.
+        
+        Args:
+            X: Input DataFrame
+            
+        Returns:
+            Transformed DataFrame with binned features added to original features
+        """
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col not in df.columns:
+                # Column missing in transform - skip or error based on handle_unknown
+                if self.handle_unknown == "error":
+                    raise ValueError(f"Column '{col}' not found in transform data")
+                continue
+            
+            series = df[col]
+            edges = self.bin_edges_[col]
+            
+            # Handle invalid values (inf, very large numbers)
+            if self.handle_invalid == "ignore":
+                series = series.replace([np.inf, -np.inf], np.nan)
+            
+            # Digitize: assign each value to a bin
+            # Note: np.digitize uses right=False by default (i.e., [a, b) intervals)
+            bin_indices = np.digitize(series.fillna(-np.inf), edges, right=False)
+            
+            # Adjust indices to be 0-based and handle out-of-range
+            # digitize returns 0 for < edges[0] and len(edges) for >= edges[-1]
+            bin_indices = bin_indices - 1  # Shift to 0-based
+            bin_indices = np.clip(bin_indices, 0, len(edges) - 2)
+            
+            # Handle NaN values - assign to separate bin or keep as NaN
+            is_nan = series.isna()
+            bin_indices[is_nan] = -1  # Use -1 for NaN
+            
+            if self.encode == "ordinal":
+                # Return ordinal encoding (0, 1, 2, ...)
+                # Replace -1 (NaN) with actual NaN
+                bin_values = bin_indices.astype(float)
+                bin_values[bin_values == -1] = np.nan
+                df[f"{col}_binned"] = bin_values
+            
+            elif self.encode == "onehot":
+                # One-hot encoding of bins
+                n_bins = self.n_bins_[col]
+                for i in range(n_bins):
+                    df[f"{col}_bin_{i}"] = (bin_indices == i).astype(int)
+                
+                # Add indicator for NaN
+                df[f"{col}_bin_nan"] = is_nan.astype(int)
+            
+            else:
+                raise ValueError(f"Unknown encode strategy: '{self.encode}'")
+        
+        return df
+    
+    def get_feature_names_out(self, input_features=None) -> list[str]:
+        """Get output feature names."""
+        names = []
+        
+        for col in self.columns_:
+            if self.encode == "ordinal":
+                names.append(f"{col}_binned")
+            elif self.encode == "onehot":
+                n_bins = self.n_bins_.get(col, self.n_bins)
+                for i in range(n_bins):
+                    names.append(f"{col}_bin_{i}")
+                names.append(f"{col}_bin_nan")
+        
+        return names
+    
+    def get_bin_edges(self) -> dict[str, np.ndarray]:
+        """Get computed bin edges for all columns.
+        
+        Returns:
+            Dict mapping column names to bin edges
+        """
+        return self.bin_edges_.copy()
+    
+    def get_bin_labels(self) -> dict[str, list[str]]:
+        """Get human-readable bin labels.
+        
+        Returns:
+            Dict mapping column names to bin labels
+        """
+        return self.bin_labels_.copy()
+
+
+class AutoBinningSelector(BaseEstimator, TransformerMixin):
+    """Automatically select optimal binning strategy per column.
+    
+    Analyzes each numeric column and chooses the best binning strategy:
+    - Skewed distributions → equal_frequency
+    - Uniform distributions → equal_width
+    - Target correlation + supervised → decision_tree
+    - Complex patterns → kmeans
+    """
+    
+    def __init__(
+        self,
+        columns: list[str] | None = None,
+        n_bins: int = 5,
+        encode: str = "ordinal",
+        prefer_supervised: bool = True,
+        skewness_threshold: float = 1.0,
+        random_state: int = 42,
+    ) -> None:
+        """Initialize auto binning selector.
+        
+        Args:
+            columns: Columns to bin (None = all numeric)
+            n_bins: Number of bins per column
+            encode: Output encoding - 'ordinal' or 'onehot'
+            prefer_supervised: Use decision_tree if target correlation is high
+            skewness_threshold: Skewness threshold for equal_frequency vs equal_width
+            random_state: Random seed
+        """
+        self.columns = columns
+        self.n_bins = n_bins
+        self.encode = encode
+        self.prefer_supervised = prefer_supervised
+        self.skewness_threshold = skewness_threshold
+        self.random_state = random_state
+        
+        # Fitted attributes
+        self.transformers_: dict[str, BinningTransformer] = {}
+        self.strategies_: dict[str, str] = {}
+        self.columns_: list[str] = []
+    
+    def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> "AutoBinningSelector":
+        """Fit by selecting optimal strategy per column.
+        
+        Args:
+            X: Input DataFrame
+            y: Target Series (optional, enables supervised binning)
+            
+        Returns:
+            Self
+        """
+        df = pd.DataFrame(X)
+        
+        # Determine columns
+        if self.columns is None:
+            self.columns_ = list(df.select_dtypes(include=[np.number]).columns)
+        else:
+            self.columns_ = [c for c in self.columns if c in df.columns]
+        
+        # Select strategy for each column
+        for col in self.columns_:
+            strategy = self._select_strategy(df[col], y)
+            self.strategies_[col] = strategy
+            
+            # Create and fit transformer for this column
+            transformer = BinningTransformer(
+                columns=[col],
+                strategy=strategy,
+                n_bins=self.n_bins,
+                encode=self.encode,
+                random_state=self.random_state,
+            )
+            transformer.fit(df[[col]], y)
+            self.transformers_[col] = transformer
+        
+        return self
+    
+    def _select_strategy(self, series: pd.Series, y: pd.Series | None) -> str:
+        """Select optimal binning strategy for a column.
+        
+        Args:
+            series: Input series
+            y: Target series (optional)
+            
+        Returns:
+            Strategy name
+        """
+        clean_data = series.replace([np.inf, -np.inf], np.nan).dropna()
+        
+        if len(clean_data) < 10:
+            # Too few samples - use simple strategy
+            return "equal_width"
+        
+        # Compute statistics
+        try:
+            skewness = abs(clean_data.skew())
+        except:
+            skewness = 0.0
+        
+        # Check target correlation if supervised mode
+        if self.prefer_supervised and y is not None:
+            try:
+                # Compute correlation with target
+                from scipy.stats import pearsonr, spearmanr
+                
+                # Align series and target
+                aligned_x = series.loc[y.index].dropna()
+                aligned_y = y.loc[aligned_x.index]
+                
+                if len(aligned_x) > 10:
+                    # Use Spearman for robustness
+                    corr, pval = spearmanr(aligned_x, aligned_y)
+                    
+                    # If strong correlation, use supervised binning
+                    if abs(corr) > 0.3 and pval < 0.05:
+                        return "decision_tree"
+            except:
+                pass
+        
+        # Skewness-based selection
+        if skewness > self.skewness_threshold:
+            return "equal_frequency"
+        else:
+            return "equal_width"
+    
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Transform using column-specific strategies.
+        
+        Args:
+            X: Input DataFrame
+            
+        Returns:
+            Transformed DataFrame with binned features added
+        """
+        df = pd.DataFrame(X).copy()
+        
+        for col in self.columns_:
+            if col in self.transformers_:
+                # Each transformer returns the column plus its binned version
+                transformed = self.transformers_[col].transform(df[[col]])
+                # Add the binned columns to df
+                for new_col in transformed.columns:
+                    if new_col != col:  # Don't duplicate the original column
+                        df[new_col] = transformed[new_col]
+        
+        return df
+    
+    def get_feature_names_out(self, input_features=None) -> list[str]:
+        """Get output feature names."""
+        names = []
+        for col in self.columns_:
+            if col in self.transformers_:
+                names.extend(self.transformers_[col].get_feature_names_out())
+        return names
+    
+    def get_strategies(self) -> dict[str, str]:
+        """Get selected strategies per column.
+        
+        Returns:
+            Dict mapping column names to selected strategies
+        """
+        return self.strategies_.copy()
 
 
 class EnsureNumericOutput(BaseEstimator, TransformerMixin):

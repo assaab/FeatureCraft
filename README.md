@@ -78,6 +78,34 @@ FeatureCraft is a comprehensive feature engineering library that automates the p
 
 🕐 **Time Series Support**: Optional time-series aware preprocessing
 
+🤖 **AI-Powered Intelligence**: Advanced LLM-driven feature engineering with adaptive optimization
+
+### AI-Powered Intelligence
+
+FeatureCraft includes sophisticated AI components that leverage Large Language Models and machine learning to make intelligent feature engineering decisions:
+
+#### 🤖 AIFeatureAdvisor
+Uses Large Language Models (OpenAI, Anthropic, or local models) to analyze your dataset characteristics and recommend optimal feature engineering strategies. It considers:
+- Column types and distributions
+- Missing value patterns
+- Outlier characteristics
+- Feature interactions and relationships
+- Domain-specific preprocessing requirements
+
+#### 📋 FeatureEngineeringPlanner
+Orchestrates the entire feature engineering workflow:
+- Analyzes dataset characteristics
+- Gets AI recommendations for optimal strategies
+- Applies smart optimizations based on data patterns
+- Configures preprocessing pipelines automatically
+
+#### 🔄 AdaptiveConfigOptimizer
+Learns from model performance feedback to continuously improve feature engineering strategies:
+- Tracks performance metrics across different datasets
+- Identifies successful patterns and configurations
+- Adapts recommendations based on historical results
+- Prevents overfitting through intelligent feature selection
+
 ### Why FeatureCraft?
 
 * **Automated Workflow**: No need to manually handle different data types and preprocessing steps

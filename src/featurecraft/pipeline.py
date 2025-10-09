@@ -20,12 +20,17 @@ from sklearn.preprocessing import FunctionTransformer
 
 from .config import FeatureCraftConfig
 from .encoders import (
+    BinaryEncoder,
+    CatBoostEncoder,
+    CountEncoder,
+    EntityEmbeddingsEncoder,
+    FrequencyEncoder,
     HashingEncoder,
     KFoldTargetEncoder,
+    OrdinalEncoder,
     OutOfFoldTargetEncoder,
     RareCategoryGrouper,
-    FrequencyEncoder,
-    CountEncoder,
+    WoEEncoder,
     make_ohe,
 )
 from .explainability import PipelineExplainer
@@ -42,7 +47,15 @@ from .plots import (
 )
 from .scalers import choose_scaler
 from .text import build_text_pipeline
-from .transformers import DateTimeFeatures, EnsureNumericOutput, NumericConverter, SkewedPowerTransformer
+from .transformers import (
+    DateTimeFeatures, 
+    EnsureNumericOutput, 
+    NumericConverter, 
+    SkewedPowerTransformer,
+    MathematicalTransformer,
+    BinningTransformer,
+    AutoBinningSelector,
+)
 from .types import DatasetInsights, PipelineSummary, TaskType
 from .validators import validate_input_frame
 from .exceptions import PipelineNotFittedError, SecurityError, InputValidationError, ExportError
@@ -76,10 +89,50 @@ class TextColumnSelector(FunctionTransformer):
 
 
 class AutoFeatureEngineer:
-    """Main class for automatic feature engineering."""
+    """Main class for automatic feature engineering with AI-powered optimization.
+    
+    Now supports intelligent feature engineering using AI (LLMs) to analyze
+    your data and recommend optimal strategies, preventing feature explosion
+    and reducing training time while maintaining performance.
+    
+    Key Features:
+    - AI-powered feature engineering recommendations
+    - Adaptive strategy selection based on dataset characteristics
+    - Intelligent feature selection to prevent overfitting
+    - Reduced training time with smarter feature creation
+    
+    Usage:
+        # Standard mode (uses heuristics)
+        afe = AutoFeatureEngineer()
+        afe.fit(X, y)
+        
+        # AI-powered mode (requires API key)
+        afe = AutoFeatureEngineer(
+            use_ai_advisor=True,
+            ai_api_key="your-openai-key"
+        )
+        afe.fit(X, y)
+    """
 
-    def __init__(self, config: FeatureCraftConfig | None = None) -> None:
-        """Initialize with optional config."""
+    def __init__(
+        self, 
+        config: FeatureCraftConfig | None = None,
+        use_ai_advisor: bool = False,
+        ai_api_key: Optional[str] = None,
+        ai_model: str = "gpt-4o-mini",
+        ai_provider: str = "openai",
+        time_budget: str = "balanced",
+    ) -> None:
+        """Initialize with optional config and AI advisor.
+        
+        Args:
+            config: Feature engineering configuration
+            use_ai_advisor: Enable AI-powered recommendations (requires API key)
+            ai_api_key: API key for LLM provider (OpenAI, Anthropic)
+            ai_model: Model name (e.g., 'gpt-4o-mini', 'claude-3-sonnet')
+            ai_provider: LLM provider ('openai', 'anthropic')
+            time_budget: Time budget ('fast', 'balanced', 'thorough')
+        """
         self.cfg = config or FeatureCraftConfig()
         self.insights_: DatasetInsights | None = None
         self.pipeline_: Pipeline | None = None
@@ -89,6 +142,29 @@ class AutoFeatureEngineer:
         self.task_: TaskType | None = None
         self.explainer_: PipelineExplainer | None = None
         self.explanation_: Any | None = None  # PipelineExplanation from explainability module
+        
+        # AI advisor integration
+        self.use_ai_advisor = use_ai_advisor
+        self.ai_planner_: Any | None = None  # FeatureEngineeringPlanner
+        self.ai_strategy_: Any | None = None  # FeatureStrategy
+        
+        if use_ai_advisor:
+            try:
+                from .ai import FeatureEngineeringPlanner
+                self.ai_planner_ = FeatureEngineeringPlanner(
+                    use_ai=True,
+                    api_key=ai_api_key,
+                    model=ai_model,
+                    provider=ai_provider,
+                    time_budget=time_budget,
+                    base_config=self.cfg,
+                    verbose=(self.cfg.verbosity >= 1),
+                )
+                logger.info("✓ AI-powered feature engineering enabled")
+            except Exception as e:
+                logger.warning(f"Failed to initialize AI advisor: {e}")
+                logger.info("Continuing with heuristic-based feature engineering")
+                self.use_ai_advisor = False
 
     # ---------- Configuration API ----------
     def set_params(self, **overrides) -> "AutoFeatureEngineer":
@@ -338,6 +414,46 @@ class AutoFeatureEngineer:
 
         # Store training columns for validation
         self._training_columns = list(X.columns)
+        
+        # AI-powered optimization: Get intelligent recommendations before building pipeline
+        if self.use_ai_advisor and self.ai_planner_ is not None:
+            try:
+                # Analyze dataset first (if not already done)
+                if self.insights_ is None:
+                    # Combine X and y for analysis
+                    df_combined = pd.concat([X, y], axis=1)
+                    self.insights_ = self.analyze(df_combined, y.name or "target")
+                
+                # Get AI recommendations - CRITICAL: Pass current config to avoid using stale base_config
+                plan = self.ai_planner_.create_plan(
+                    X=X,
+                    y=y,
+                    insights=self.insights_,
+                    estimator_family=estimator_family,
+                    current_config=self.cfg,  # Pass current config instead of using stale base_config
+                )
+                
+                # Apply optimized configuration
+                self.cfg = plan.config
+                self.ai_strategy_ = plan.strategy
+                
+                logger.info(f"✓ Applied AI-optimized configuration (estimated {plan.strategy.estimated_feature_count} features)")
+            
+            except RuntimeError as e:
+                # AI feature engineering failed - re-raise with clear message
+                if "AI-powered feature engineering failed" in str(e):
+                    console.print(f"\n[red]❌ AI feature engineering failed: {e}[/red]")
+                    console.print("[yellow]💡 Tip: Use use_ai_advisor=False for heuristic-based feature engineering[/yellow]")
+                else:
+                    console.print(f"\n[red]❌ AI optimization failed: {e}[/red]")
+                    console.print("[yellow]💡 Tip: Check API key and model configuration[/yellow]")
+                raise
+            except Exception as e:
+                # Re-raise all exceptions - do NOT fall back to local feature creation
+                logger.error(f"AI optimization failed with unexpected error: {e}")
+                console.print(f"\n[red]❌ AI feature engineering failed: {e}[/red]")
+                console.print("[yellow]💡 Tip: Use use_ai_advisor=False for heuristic-based feature engineering[/yellow]")
+                raise RuntimeError(f"AI feature engineering failed: {str(e)}") from e
         
         self.estimator_family_ = estimator_family
         self.pipeline_ = self._build_pipeline(X, y, estimator_family)
@@ -769,31 +885,178 @@ class AutoFeatureEngineer:
             ("convert", NumericConverter(columns=num_cols)),  # Ensure numeric conversion
             ("impute", num_imputer)
         ]
-        if any(skew_mask):
-            skewed_cols = [c for c, mask in zip(num_cols, skew_mask) if mask]
-            skewed_info = {c: f"{skew_map[c]:.2f}" for c in skewed_cols[:10]}
+        
+        # Optional binning/discretization BEFORE power transforms
+        # This allows linear models to learn thresholds and non-linear patterns
+        if cfg.binning_enabled and num_cols:
+            if cfg.binning_strategy == "auto":
+                # Use AutoBinningSelector for intelligent strategy selection
+                binning_transformer = AutoBinningSelector(
+                    columns=cfg.binning_columns or num_cols,
+                    n_bins=cfg.binning_n_bins,
+                    encode=cfg.binning_encode,
+                    prefer_supervised=cfg.binning_prefer_supervised,
+                    skewness_threshold=cfg.binning_skewness_threshold,
+                    random_state=cfg.random_state,
+                )
+                strategy_desc = "Auto (adaptive per column)"
+            else:
+                # Use specific strategy for all columns
+                binning_transformer = BinningTransformer(
+                    columns=cfg.binning_columns or num_cols,
+                    strategy=cfg.binning_strategy,
+                    n_bins=cfg.binning_n_bins,
+                    encode=cfg.binning_encode,
+                    custom_bins=cfg.binning_custom_bins,
+                    handle_unknown=cfg.binning_handle_unknown,
+                    subsample=cfg.binning_subsample,
+                    random_state=cfg.random_state,
+                )
+                strategy_desc = cfg.binning_strategy
             
+            # Fit binning to determine actual columns binned
+            binning_transformer.fit(X[num_cols], y)
+            
+            # Explain binning transformation
+            binning_cols = cfg.binning_columns or num_cols
             self.explainer_.explain_transformation(
-                transform_name="Yeo-Johnson Power Transform",
-                columns=skewed_cols,
+                transform_name="Binning/Discretization",
+                columns=binning_cols,
                 reason=(
-                    f"Applying Yeo-Johnson transformation to {len(skewed_cols)} skewed numeric features "
-                    f"(|skewness| >= {cfg.skew_threshold}). This normalizes distributions and can improve "
-                    "model performance for linear models and neural networks."
+                    f"Converting {len(binning_cols)} continuous features into {cfg.binning_n_bins} discrete bins "
+                    f"using {strategy_desc} strategy. This enables linear models to learn non-linear patterns "
+                    "and threshold effects (e.g., 'age > 65 → high risk'). "
+                    f"Output encoding: {cfg.binning_encode}."
                 ),
                 details={
-                    "n_features": len(skewed_cols),
-                    "skewness_threshold": cfg.skew_threshold,
-                    "sample_skewness": skewed_info,
+                    "n_columns": len(binning_cols),
+                    "strategy": cfg.binning_strategy,
+                    "n_bins": cfg.binning_n_bins,
+                    "encode": cfg.binning_encode,
+                    "prefer_supervised": cfg.binning_prefer_supervised if cfg.binning_strategy == "auto" else None,
                 },
-                config_params={"skew_threshold": cfg.skew_threshold},
+                config_params={
+                    "binning_enabled": cfg.binning_enabled,
+                    "binning_strategy": cfg.binning_strategy,
+                    "binning_n_bins": cfg.binning_n_bins,
+                    "binning_encode": cfg.binning_encode,
+                    "binning_prefer_supervised": cfg.binning_prefer_supervised,
+                },
                 recommendation=(
-                    "Power transforms are most beneficial for linear models. "
-                    "Tree-based models are generally robust to skewness."
+                    "Binning is especially useful for linear models (logistic regression, linear regression) "
+                    "and can sometimes benefit tree-based models by reducing overfitting on continuous values."
                 ),
             )
             
-            steps_num.append(("yeojohnson", SkewedPowerTransformer(num_cols, skew_mask)))
+            steps_num.append(("binning", binning_transformer))
+        
+        # Mathematical transforms: Use new MathematicalTransformer with intelligent auto-selection
+        # This replaces the old SkewedPowerTransformer with more comprehensive transform options
+        if cfg.transform_strategy != "none" and num_cols:
+            # Determine columns to transform
+            transform_cols = cfg.transform_columns or num_cols
+            
+            # Create MathematicalTransformer with unified interface
+            math_transformer = MathematicalTransformer(
+                columns=transform_cols,
+                strategy=cfg.transform_strategy,
+                log_shift=cfg.log_shift,
+                sqrt_handle_negatives=cfg.sqrt_handle_negatives,
+                reciprocal_epsilon=cfg.reciprocal_epsilon,
+                exponential_type=cfg.exponential_transform_type,
+                boxcox_lambda=cfg.boxcox_lambda,
+                skew_threshold=cfg.skew_threshold,
+            )
+            
+            # Fit transformer to determine strategies per column
+            math_transformer.fit(X[transform_cols], y)
+            
+            # Get selected strategies for explanation
+            strategies = math_transformer.get_strategies()
+            skewness_values = math_transformer.get_skewness()
+            
+            # Group columns by transform type for explanation
+            strategy_groups: dict[str, list[str]] = {}
+            for col, strategy in strategies.items():
+                if strategy != "none":
+                    if strategy not in strategy_groups:
+                        strategy_groups[strategy] = []
+                    strategy_groups[strategy].append(col)
+            
+            # Build comprehensive explanation
+            if strategy_groups:
+                transform_summary = []
+                for strategy, cols in strategy_groups.items():
+                    n_cols = len(cols)
+                    sample_cols = cols[:5]
+                    sample_skew = {c: f"{skewness_values.get(c, 0):.2f}" for c in sample_cols}
+                    
+                    strategy_name_map = {
+                        "log": "Log transform: log(x + shift)",
+                        "log1p": "Log1p transform: log(1 + x)",
+                        "sqrt": "Square root transform: sqrt(x)",
+                        "box_cox": "Box-Cox transform (optimized lambda)",
+                        "yeo_johnson": "Yeo-Johnson transform (handles negatives)",
+                        "reciprocal": "Reciprocal transform: 1/x",
+                        "exponential": f"Exponential transform: {cfg.exponential_transform_type}",
+                    }
+                    
+                    transform_summary.append(
+                        f"  • {strategy_name_map.get(strategy, strategy)}: {n_cols} columns "
+                        f"(sample: {', '.join(sample_cols)})"
+                    )
+                
+                total_transformed = sum(len(cols) for cols in strategy_groups.values())
+                
+                if cfg.transform_strategy == "auto":
+                    reason = (
+                        f"Applying intelligent auto-selected mathematical transforms to {total_transformed}/{len(transform_cols)} "
+                        f"numeric features based on data characteristics (skewness, range, zeros, negatives). "
+                        f"Transforms normalize distributions and improve model performance.\n\n"
+                        f"Selected transforms:\n" + "\n".join(transform_summary)
+                    )
+                else:
+                    reason = (
+                        f"Applying {cfg.transform_strategy} transform to {total_transformed} numeric features "
+                        f"based on configuration setting (transform_strategy='{cfg.transform_strategy}').\n\n"
+                        f"Transformed columns:\n" + "\n".join(transform_summary)
+                    )
+                
+                self.explainer_.explain_transformation(
+                    transform_name=f"Mathematical Transforms ({cfg.transform_strategy})",
+                    columns=list(strategies.keys()),
+                    reason=reason,
+                    details={
+                        "strategy": cfg.transform_strategy,
+                        "n_transformed": total_transformed,
+                        "n_total": len(transform_cols),
+                        "strategy_breakdown": {k: len(v) for k, v in strategy_groups.items()},
+                        "sample_skewness": {c: f"{skewness_values.get(c, 0):.2f}" for c in list(strategies.keys())[:10]},
+                    },
+                    config_params={
+                        "transform_strategy": cfg.transform_strategy,
+                        "skew_threshold": cfg.skew_threshold,
+                        "log_shift": cfg.log_shift,
+                        "sqrt_handle_negatives": cfg.sqrt_handle_negatives,
+                        "reciprocal_epsilon": cfg.reciprocal_epsilon,
+                        "exponential_transform_type": cfg.exponential_transform_type,
+                        "boxcox_lambda": cfg.boxcox_lambda,
+                    },
+                    recommendation=(
+                        "Mathematical transforms are most beneficial for linear models and neural networks. "
+                        "Tree-based models are generally robust to skewness but may benefit from log/log1p for "
+                        "very large magnitude differences. Auto-selection intelligently chooses the best transform "
+                        "per column based on data characteristics."
+                    ),
+                )
+                
+                steps_num.append(("math_transform", math_transformer))
+            else:
+                # All columns had skewness below threshold - no transform needed
+                logger.debug(
+                    f"No transforms applied: all {len(transform_cols)} columns have "
+                    f"|skewness| < {cfg.skew_threshold}"
+                )
         
         # Optional winsorization before scaling
         if cfg.winsorize:
@@ -1398,7 +1661,67 @@ class AutoFeatureEngineer:
             else:
                 logger.warning("Feature interactions enabled but no transformers were built")
         
-        # STEP 4: Optional dimensionality reducer
+        # STEP 4: Optional MI-based feature selection (after interactions)
+        # This reduces feature count to prevent overfitting and improve performance
+        if cfg.use_mi and cfg.mi_top_k:
+            from .selection import MutualInfoSelector
+            
+            # Determine task type for MI computation
+            task_str = "classification" if task == TaskType.CLASSIFICATION else "regression"
+            
+            mi_selector = MutualInfoSelector(
+                k=cfg.mi_top_k,
+                task=task_str,
+                random_state=cfg.random_state,
+            )
+            
+            # Add to pipeline
+            pipe_steps.append(("mi_selection", mi_selector))
+            
+            # Explain MI selection
+            self.explainer_.explain_feature_selection(
+                method="Mutual Information (MI)",
+                target_features=cfg.mi_top_k,
+                reason=(
+                    f"Selecting top {cfg.mi_top_k} features by mutual information score to prevent overfitting "
+                    "and reduce computational cost. MI captures both linear and non-linear relationships between "
+                    "features and target, making it a robust feature selection method."
+                ),
+                config_params={
+                    "use_mi": cfg.use_mi,
+                    "mi_top_k": cfg.mi_top_k,
+                },
+            )
+            
+            logger.info(f"MI feature selection enabled: keeping top {cfg.mi_top_k} features")
+        
+        # STEP 5: Optional WoE/IV-based feature selection (binary classification only)
+        if cfg.use_woe_selection and task == TaskType.CLASSIFICATION:
+            from .selection import WOEIVSelector
+            
+            woe_selector = WOEIVSelector(
+                threshold=cfg.woe_iv_threshold,
+                random_state=cfg.random_state,
+            )
+            
+            pipe_steps.append(("woe_selection", woe_selector))
+            
+            self.explainer_.explain_feature_selection(
+                method="Weight of Evidence (WoE/IV)",
+                target_features=None,  # Threshold-based, not fixed count
+                reason=(
+                    f"Selecting features with Information Value (IV) >= {cfg.woe_iv_threshold} using WoE encoding. "
+                    "Features with low IV have weak predictive power and are removed."
+                ),
+                config_params={
+                    "use_woe_selection": cfg.use_woe_selection,
+                    "woe_iv_threshold": cfg.woe_iv_threshold,
+                },
+            )
+            
+            logger.info(f"WoE/IV feature selection enabled with threshold {cfg.woe_iv_threshold}")
+        
+        # STEP 6: Optional dimensionality reducer
         if cfg.reducer_kind:
             from .transformers import DimensionalityReducer
             
@@ -1437,7 +1760,7 @@ class AutoFeatureEngineer:
                 )
             ))
         
-        # STEP 4: Final safety check
+        # STEP 7: Final safety check
         pipe_steps.append(("ensure_numeric", EnsureNumericOutput()))
         
         # Build pipeline with optional caching
@@ -1480,6 +1803,20 @@ class AutoFeatureEngineer:
             elif step_name == "interactions":
                 # Handle FeatureUnion (NEW: this was missing!)
                 names.extend(self._get_names_from_feature_union(step_transformer, sample))
+            
+            elif step_name == "mi_selection" or step_name == "woe_selection":
+                # Handle feature selection - filters existing features
+                if hasattr(step_transformer, 'get_feature_names_out'):
+                    try:
+                        selected_names = step_transformer.get_feature_names_out(names)
+                        names = list(selected_names)
+                        logger.debug(f"{step_name}: Selected {len(names)} features")
+                    except Exception as e:
+                        logger.warning(f"Failed to get feature names from {step_name}: {e}")
+                elif hasattr(step_transformer, 'selected_features_'):
+                    # Use selected_features_ attribute
+                    names = [n for n in names if n in step_transformer.selected_features_]
+                    logger.debug(f"{step_name}: Filtered to {len(names)} selected features")
             
             elif step_name == "reducer":
                 # Handle dimensionality reducer
@@ -1535,9 +1872,15 @@ class AutoFeatureEngineer:
                 col_indices = [i for i, col in enumerate(X.columns) if col in cols]
                 if col_indices:
                     sample_subset = sample.iloc[:, col_indices]
-                    trans_output = trans.transform(sample_subset)
-                    trans_arr = trans_output.toarray() if hasattr(trans_output, "toarray") else np.asarray(trans_output)
-                    n_features_actual = trans_arr.shape[1]
+                    # Check if transformer is fitted before calling transform
+                    # Most sklearn transformers have fitted attributes like 'n_features_in_' when fitted
+                    if hasattr(trans, 'n_features_in_'):
+                        trans_output = trans.transform(sample_subset)
+                        trans_arr = trans_output.toarray() if hasattr(trans_output, "toarray") else np.asarray(trans_output)
+                        n_features_actual = trans_arr.shape[1]
+                    else:
+                        # Fallback to using column names if transformer not fitted
+                        n_features_actual = len(colnames)
                 else:
                     n_features_actual = len(colnames)
                 
@@ -1586,15 +1929,21 @@ class AutoFeatureEngineer:
             
             # Fallback: transform sample and count features
             try:
-                trans_output = transformer.transform(sample)
-                trans_arr = trans_output.toarray() if hasattr(trans_output, "toarray") else np.asarray(trans_output)
-                n_feats = trans_arr.shape[1]
-                fallback_names = [f"{trans_name}__feat_{i}" for i in range(n_feats)]
-                names.extend(fallback_names)
-                logger.warning(
-                    f"{trans_name} doesn't support get_feature_names_out properly. "
-                    f"Using fallback names for {n_feats} features."
-                )
+                # Check if transformer is fitted before calling transform
+                if hasattr(transformer, 'n_features_in_'):
+                    trans_output = transformer.transform(sample)
+                    trans_arr = trans_output.toarray() if hasattr(trans_output, "toarray") else np.asarray(trans_output)
+                    n_feats = trans_arr.shape[1]
+                    fallback_names = [f"{trans_name}__feat_{i}" for i in range(n_feats)]
+                    names.extend(fallback_names)
+                    logger.warning(
+                        f"{trans_name} doesn't support get_feature_names_out properly. "
+                        f"Using fallback names for {n_feats} features."
+                    )
+                else:
+                    # Transformer not fitted, skip fallback
+                    logger.debug(f"Skipping fallback for unfitted transformer {trans_name}")
+                    continue
             except Exception as e:
                 logger.error(f"Failed to get names from {trans_name}: {e}")
         

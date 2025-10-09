@@ -109,6 +109,50 @@ class FeatureCraftConfig(BaseModel):
         default=False,
         description="Use Weight of Evidence encoding for binary classification"
     )
+    use_binary: bool = Field(
+        default=False,
+        description="Use binary encoding (converts categories to binary representation)"
+    )
+    use_catboost: bool = Field(
+        default=False,
+        description="Use CatBoost-style encoding (ordered target statistics)"
+    )
+    catboost_smoothing: float = Field(
+        default=10.0, ge=0.0,
+        description="Smoothing parameter for CatBoost encoding"
+    )
+    use_entity_embeddings: bool = Field(
+        default=False,
+        description="Use entity embeddings (neural network-based learned representations)"
+    )
+    entity_embeddings_dim: Optional[int] = Field(
+        default=None, ge=2, le=100,
+        description="Embedding dimension for entity embeddings (None = auto: min(50, cardinality // 2))"
+    )
+    entity_embeddings_hidden_dims: List[int] = Field(
+        default_factory=lambda: [128, 64],
+        description="Hidden layer dimensions for entity embeddings neural network"
+    )
+    entity_embeddings_epochs: int = Field(
+        default=10, ge=1, le=100,
+        description="Number of training epochs for entity embeddings"
+    )
+    entity_embeddings_batch_size: int = Field(
+        default=256, ge=32, le=2048,
+        description="Batch size for entity embeddings training"
+    )
+    entity_embeddings_learning_rate: float = Field(
+        default=0.001, ge=0.0001, le=0.1,
+        description="Learning rate for entity embeddings optimizer"
+    )
+    entity_embeddings_dropout: float = Field(
+        default=0.1, ge=0.0, le=0.5,
+        description="Dropout rate for entity embeddings regularization"
+    )
+    entity_embeddings_backend: str = Field(
+        default="keras",
+        description="Deep learning backend for entity embeddings: keras (TensorFlow) or pytorch"
+    )
 
     # ========== Scaling & Transforms ==========
     skew_threshold: float = Field(
@@ -118,6 +162,36 @@ class FeatureCraftConfig(BaseModel):
     outlier_share_threshold: float = Field(
         default=0.05, ge=0.0, le=1.0,
         description="Fraction of outliers (>1.5*IQR) to trigger robust scaling"
+    )
+    
+    # Mathematical Transforms
+    transform_strategy: str = Field(
+        default="auto",
+        description="Transform strategy: auto, log, log1p, sqrt, box_cox, yeo_johnson, reciprocal, exponential, none"
+    )
+    log_shift: float = Field(
+        default=1e-5, ge=0.0,
+        description="Shift value for log transform: log(x + shift) to handle zeros/negatives"
+    )
+    transform_columns: Optional[List[str]] = Field(
+        default=None,
+        description="Specific columns to transform (None = auto-detect based on skewness)"
+    )
+    boxcox_lambda: Optional[float] = Field(
+        default=None,
+        description="Fixed lambda for Box-Cox transform (None = optimize automatically)"
+    )
+    sqrt_handle_negatives: str = Field(
+        default="abs",
+        description="How to handle negatives in sqrt: abs (sqrt(abs(x)) * sign(x)), clip (set to 0), error"
+    )
+    reciprocal_epsilon: float = Field(
+        default=1e-10, ge=0.0,
+        description="Small value to prevent division by zero in reciprocal transform: 1/(x + epsilon)"
+    )
+    exponential_transform_type: str = Field(
+        default="square",
+        description="Type of exponential transform: square (x²), cube (x³), exp (e^x)"
     )
     scaler_linear: str = Field(
         default="standard",
@@ -336,6 +410,48 @@ class FeatureCraftConfig(BaseModel):
         description="Apply stemming to text (Porter stemmer)"
     )
 
+    # ========== Binning / Discretization ==========
+    binning_enabled: bool = Field(
+        default=False,
+        description="Enable binning/discretization of continuous features"
+    )
+    binning_strategy: str = Field(
+        default="auto",
+        description="Binning strategy: auto, equal_width, equal_frequency, kmeans, decision_tree, custom"
+    )
+    binning_n_bins: int = Field(
+        default=5, ge=2, le=20,
+        description="Number of bins for discretization"
+    )
+    binning_encode: str = Field(
+        default="ordinal",
+        description="Binning output encoding: ordinal (0,1,2...) or onehot"
+    )
+    binning_columns: Optional[List[str]] = Field(
+        default=None,
+        description="Specific columns to bin (None = auto-detect numeric columns)"
+    )
+    binning_skewness_threshold: float = Field(
+        default=1.0, ge=0.0,
+        description="Skewness threshold for auto strategy (>threshold → equal_frequency)"
+    )
+    binning_prefer_supervised: bool = Field(
+        default=True,
+        description="Use decision_tree strategy when target correlation is strong (auto mode)"
+    )
+    binning_custom_bins: Optional[Dict[str, List[float]]] = Field(
+        default=None,
+        description="Custom bin edges per column (for custom strategy): {'col': [0, 10, 20, 30]}"
+    )
+    binning_handle_unknown: str = Field(
+        default="ignore",
+        description="How to handle unknown values: ignore, error"
+    )
+    binning_subsample: Optional[int] = Field(
+        default=200_000, ge=1000,
+        description="Subsample size for expensive binning methods (kmeans, decision_tree)"
+    )
+
     # ========== Feature Interactions ==========
     interactions_enabled: bool = Field(
         default=False,
@@ -472,6 +588,112 @@ class FeatureCraftConfig(BaseModel):
     time_order: Optional[str] = Field(
         default=None,
         description="Column to sort by for time-ordered operations"
+    )
+    
+    # ========== Aggregation Features ==========
+    aggregations_enabled: bool = Field(
+        default=False,
+        description="Enable aggregation features (GroupBy stats, rolling windows, lags, ranks)"
+    )
+    
+    # GroupBy Statistics
+    agg_use_groupby: bool = Field(
+        default=True,
+        description="Create group-level statistics (mean, sum, std per group)"
+    )
+    agg_group_cols: Optional[List[str]] = Field(
+        default=None,
+        description="Columns to group by (e.g., ['customer_id', 'store_id']). Auto-detected if None"
+    )
+    agg_value_cols: Optional[List[str]] = Field(
+        default=None,
+        description="Columns to aggregate (None = all numeric columns)"
+    )
+    agg_functions: List[str] = Field(
+        default_factory=lambda: ['mean', 'sum', 'std', 'max', 'min'],
+        description="Aggregation functions: mean, sum, std, min, max, median, count, nunique, var, skew, kurt"
+    )
+    agg_add_count: bool = Field(
+        default=True,
+        description="Add group size (count) as a feature in GroupBy stats"
+    )
+    
+    # Rolling Windows
+    agg_use_rolling: bool = Field(
+        default=True,
+        description="Create rolling window features (moving averages, sums)"
+    )
+    agg_rolling_windows: List[int] = Field(
+        default_factory=lambda: [3, 7, 14, 28],
+        description="Rolling window sizes (e.g., [7, 14] for 7-day and 14-day windows)"
+    )
+    agg_rolling_functions: List[str] = Field(
+        default_factory=lambda: ['mean', 'sum', 'std'],
+        description="Rolling window aggregation functions"
+    )
+    agg_rolling_min_periods: Optional[int] = Field(
+        default=None,
+        description="Minimum observations for rolling windows (None = use window size)"
+    )
+    agg_rolling_shift: int = Field(
+        default=1, ge=0,
+        description="Shift rolling window by N periods to avoid leakage (1 = exclude current row)"
+    )
+    
+    # Expanding Windows
+    agg_use_expanding: bool = Field(
+        default=True,
+        description="Create expanding window features (cumulative sums, means)"
+    )
+    agg_expanding_functions: List[str] = Field(
+        default_factory=lambda: ['sum', 'mean'],
+        description="Expanding window aggregation functions"
+    )
+    agg_expanding_min_periods: int = Field(
+        default=1, ge=1,
+        description="Minimum observations for expanding windows"
+    )
+    agg_expanding_shift: int = Field(
+        default=1, ge=0,
+        description="Shift expanding window by N periods to avoid leakage"
+    )
+    
+    # Lag Features
+    agg_use_lags: bool = Field(
+        default=True,
+        description="Create lag features (previous values at t-1, t-7, etc.)"
+    )
+    agg_lag_periods: List[int] = Field(
+        default_factory=lambda: [1, 7, 14, 28],
+        description="Lag periods (e.g., [1, 7] for 1-period and 7-period lags)"
+    )
+    agg_lag_fill_value: Optional[float] = Field(
+        default=None,
+        description="Fill value for missing lags (None = leave as NaN)"
+    )
+    
+    # Rank Features
+    agg_use_ranks: bool = Field(
+        default=True,
+        description="Create rank/percentile features within groups"
+    )
+    agg_rank_method: str = Field(
+        default='percent',
+        description="Ranking method: average, min, max, dense, percent"
+    )
+    agg_rank_ascending: bool = Field(
+        default=True,
+        description="Rank in ascending order (True) or descending (False)"
+    )
+    
+    # General Aggregation Settings
+    agg_time_col: Optional[str] = Field(
+        default=None,
+        description="Time column for sorting in time-series aggregations (uses time_column if None)"
+    )
+    agg_max_features: int = Field(
+        default=200, ge=10, le=1000,
+        description="Maximum aggregation features to create"
     )
     
     # Datetime Feature Extraction Options
@@ -728,10 +950,6 @@ class FeatureCraftConfig(BaseModel):
     ai_max_features: int = Field(
         default=100, ge=10, le=500,
         description="Maximum features for AI planner to generate"
-    )
-    ai_max_tokens: int = Field(
-        default=50000, ge=1000, le=200000,
-        description="Maximum tokens per AI request"
     )
     ai_timeout_seconds: int = Field(
         default=60, ge=10, le=300,

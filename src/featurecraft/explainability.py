@@ -657,6 +657,34 @@ class PipelineExplainer:
             )
         )
     
+    def explain_feature_selection(
+        self,
+        method: str,
+        target_features: int | None,
+        reason: str,
+        config_params: dict[str, Any],
+    ) -> None:
+        """Explain feature selection."""
+        if not self.enabled:
+            return
+        
+        details = {
+            "method": method,
+        }
+        if target_features is not None:
+            details["target_features"] = target_features
+        
+        self.explanation.add_explanation(
+            TransformationExplanation(
+                category=DecisionCategory.SELECTION,
+                operation=f"{method} Feature Selection",
+                columns=[],  # Applied to all features
+                reason=reason,
+                details=details,
+                config_used=config_params,
+            )
+        )
+    
     def explain_validation(
         self,
         validation_type: str,
