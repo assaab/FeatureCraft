@@ -107,5 +107,5 @@ _audit_artifacts_*/
 .pytest_cache/
 dist/
 logs/
-src/featurecraft/ai
+examples/
 htmlcov/

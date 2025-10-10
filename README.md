@@ -106,6 +106,43 @@ Learns from model performance feedback to continuously improve feature engineeri
 - Adapts recommendations based on historical results
 - Prevents overfitting through intelligent feature selection
 
+#### Using AI Features
+
+```python
+from featurecraft.ai.advisor import AIFeatureAdvisor
+from featurecraft.ai.planner import FeatureEngineeringPlanner
+from featurecraft.pipeline import AutoFeatureEngineer
+import pandas as pd
+
+# Load your data
+df = pd.read_csv("your_data.csv")
+X, y = df.drop(columns=["target"]), df["target"]
+
+# Option 1: Use AI Advisor directly for recommendations
+advisor = AIFeatureAdvisor(provider="openai", api_key="your-api-key")
+recommendations = advisor.get_recommendations(X, y, task_type="classification")
+print(recommendations)
+
+# Option 2: Use Feature Engineering Planner (recommended)
+planner = FeatureEngineeringPlanner(ai_advisor=advisor)
+config = planner.plan_feature_engineering(X, y, estimator_family="tree")
+
+# Apply the AI-optimized configuration
+afe = AutoFeatureEngineer(config=config)
+X_transformed = afe.fit_transform(X, y, estimator_family="tree")
+
+# Option 3: Enable adaptive optimization with feedback
+from featurecraft.ai.adaptive_optimizer import AdaptiveConfigOptimizer
+
+optimizer = AdaptiveConfigOptimizer()
+optimized_config = optimizer.optimize_config(X, y, base_config=config)
+afe = AutoFeatureEngineer(config=optimized_config)
+X_transformed = afe.fit_transform(X, y, estimator_family="tree")
+
+# Provide feedback to improve future recommendations
+optimizer.record_feedback(config, performance_score=0.95)
+```
+
 ### Why FeatureCraft?
 
 * **Automated Workflow**: No need to manually handle different data types and preprocessing steps
