@@ -166,7 +166,7 @@ class AutoFeatureEngineer:
                     base_config=self.cfg,
                     verbose=(self.cfg.verbosity >= 1),
                 )
-                logger.info("✓ AI-powered feature engineering enabled")
+                logger.info("[OK] AI-powered feature engineering enabled")
             except Exception as e:
                 logger.warning(f"Failed to initialize AI advisor: {e}")
                 logger.info("Continuing with heuristic-based feature engineering")
@@ -443,22 +443,22 @@ class AutoFeatureEngineer:
                 self.cfg = plan.config
                 self.ai_strategy_ = plan.strategy
                 
-                logger.info(f"✓ Applied AI-optimized configuration (estimated {plan.strategy.estimated_feature_count} features)")
+                logger.info(f"[OK] Applied AI-optimized configuration (estimated {plan.strategy.estimated_feature_count} features)")
             
             except RuntimeError as e:
                 # AI feature engineering failed - re-raise with clear message
                 if "AI-powered feature engineering failed" in str(e):
-                    console.print(f"\n[red]❌ AI feature engineering failed: {e}[/red]")
-                    console.print("[yellow]💡 Tip: Use use_ai_advisor=False for heuristic-based feature engineering[/yellow]")
+                    console.print(f"\n[red][X] AI feature engineering failed: {e}[/red]")
+                    console.print("[yellow][!] Tip: Use use_ai_advisor=False for heuristic-based feature engineering[/yellow]")
                 else:
-                    console.print(f"\n[red]❌ AI optimization failed: {e}[/red]")
-                    console.print("[yellow]💡 Tip: Check API key and model configuration[/yellow]")
+                    console.print(f"\n[red][X] AI optimization failed: {e}[/red]")
+                    console.print("[yellow][!] Tip: Check API key and model configuration[/yellow]")
                 raise
             except Exception as e:
                 # Re-raise all exceptions - do NOT fall back to local feature creation
                 logger.error(f"AI optimization failed with unexpected error: {e}")
-                console.print(f"\n[red]❌ AI feature engineering failed: {e}[/red]")
-                console.print("[yellow]💡 Tip: Use use_ai_advisor=False for heuristic-based feature engineering[/yellow]")
+                console.print(f"\n[red][X] AI feature engineering failed: {e}[/red]")
+                console.print("[yellow][!] Tip: Use use_ai_advisor=False for heuristic-based feature engineering[/yellow]")
                 raise RuntimeError(f"AI feature engineering failed: {str(e)}") from e
         
         self.estimator_family_ = estimator_family
@@ -931,7 +931,7 @@ class AutoFeatureEngineer:
                 reason=(
                     f"Converting {len(binning_cols)} continuous features into {cfg.binning_n_bins} discrete bins "
                     f"using {strategy_desc} strategy. This enables linear models to learn non-linear patterns "
-                    "and threshold effects (e.g., 'age > 65 → high risk'). "
+                    "and threshold effects (e.g., 'age > 65 -> high risk'). "
                     f"Output encoding: {cfg.binning_encode}."
                 ),
                 details={
@@ -1116,7 +1116,7 @@ class AutoFeatureEngineer:
                 },
                 recommendation=(
                     "Clustering features are especially useful for: (1) Discovering hidden segments in customer/user data, "
-                    "(2) Anomaly/outlier detection (DBSCAN), (3) Creating interaction features (cluster × numeric), "
+                    "(2) Anomaly/outlier detection (DBSCAN), (3) Creating interaction features (cluster x numeric), "
                     "(4) Improving model performance by adding non-linear patterns. "
                     "Consider combining with feature interactions for maximum benefit."
                 ),
@@ -1176,7 +1176,7 @@ class AutoFeatureEngineer:
                     }
                     
                     transform_summary.append(
-                        f"  • {strategy_name_map.get(strategy, strategy)}: {n_cols} columns "
+                        f"  * {strategy_name_map.get(strategy, strategy)}: {n_cols} columns "
                         f"(sample: {', '.join(sample_cols)})"
                     )
                 
@@ -1800,7 +1800,7 @@ class AutoFeatureEngineer:
                 if cfg.interactions_use_products:
                     enabled_interactions.append(f"{cfg.interactions_product_n_way}-way Products")
                 if cfg.interactions_use_categorical_numeric:
-                    enabled_interactions.append(f"Categorical×Numeric ({cfg.interactions_cat_num_strategy})")
+                    enabled_interactions.append(f"CategoricalxNumeric ({cfg.interactions_cat_num_strategy})")
                 if cfg.interactions_use_binned:
                     enabled_interactions.append(f"Binned Interactions ({cfg.interactions_n_bins} bins)")
                 

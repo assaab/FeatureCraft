@@ -684,10 +684,10 @@ class AdaptiveClusteringExtractor(BaseEstimator, TransformerMixin):
     - Appropriate parameters for the chosen method
     
     Decision Rules:
-    - High-dimensional data → K-Means (fast, scalable)
-    - Non-convex clusters or outliers → DBSCAN
-    - Overlapping clusters → Gaussian Mixture
-    - Hierarchical structure → Hierarchical clustering
+    - High-dimensional data -> K-Means (fast, scalable)
+    - Non-convex clusters or outliers -> DBSCAN
+    - Overlapping clusters -> Gaussian Mixture
+    - Hierarchical structure -> Hierarchical clustering
     
     Example:
         >>> ace = AdaptiveClusteringExtractor(
@@ -812,11 +812,11 @@ class AdaptiveClusteringExtractor(BaseEstimator, TransformerMixin):
         """
         n_samples, n_features = X.shape
         
-        # Rule 1: Small dataset → GMM (more flexible)
+        # Rule 1: Small dataset -> GMM (more flexible)
         if n_samples < 1000:
             return 'gmm'
         
-        # Rule 2: High-dimensional → K-Means (scalable)
+        # Rule 2: High-dimensional -> K-Means (scalable)
         if n_features > 20:
             return 'kmeans'
         

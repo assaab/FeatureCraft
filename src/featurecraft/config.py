@@ -83,11 +83,11 @@ class FeatureCraftConfig(BaseModel):
     )
     use_frequency_encoding: bool = Field(
         default=False,
-        description="Enable frequency encoding (category → frequency count)"
+        description="Enable frequency encoding (category to frequency count)"
     )
     use_count_encoding: bool = Field(
         default=False,
-        description="Enable count encoding (category → occurrence count)"
+        description="Enable count encoding (category to occurrence count)"
     )
     target_encoding_noise: float = Field(
         default=0.01, ge=0.0, le=1.0,
@@ -433,7 +433,7 @@ class FeatureCraftConfig(BaseModel):
     )
     binning_skewness_threshold: float = Field(
         default=1.0, ge=0.0,
-        description="Skewness threshold for auto strategy (>threshold → equal_frequency)"
+        description="Skewness threshold for auto strategy (>threshold to equal_frequency)"
     )
     binning_prefer_supervised: bool = Field(
         default=True,
@@ -585,7 +585,7 @@ class FeatureCraftConfig(BaseModel):
     # Polynomial Interactions
     interactions_use_polynomial: bool = Field(
         default=True,
-        description="Create polynomial features (x², x³, x₁×x₂, etc.)"
+        description="Create polynomial features (x^2, x^3, x1*x2, etc.)"
     )
     interactions_polynomial_degree: int = Field(
         default=2, ge=2, le=3,
@@ -621,7 +621,7 @@ class FeatureCraftConfig(BaseModel):
     # Product Interactions (multi-way)
     interactions_use_products: bool = Field(
         default=False,
-        description="Create multi-way product interactions (A×B×C)"
+        description="Create multi-way product interactions (AxBxC)"
     )
     interactions_product_n_way: int = Field(
         default=3, ge=2, le=5,
@@ -632,10 +632,10 @@ class FeatureCraftConfig(BaseModel):
         description="Maximum number of product interactions to create"
     )
     
-    # Categorical × Numeric Interactions
+    # Categorical x Numeric Interactions
     interactions_use_categorical_numeric: bool = Field(
         default=True,
-        description="Create categorical×numeric interactions (group statistics, deviations)"
+        description="Create categoricalxnumeric interactions (group statistics, deviations)"
     )
     interactions_cat_num_strategy: str = Field(
         default='both',

@@ -14,6 +14,49 @@ from .utils import is_numeric_series
 logger = get_logger(__name__)
 
 
+def compute_psi(reference: np.ndarray, current: np.ndarray, buckets: int = 10) -> float:
+    """Calculate Population Stability Index for numeric features with binning.
+
+    PSI = sum((actual% - expected%) * ln(actual% / expected%))
+
+    Args:
+        reference: Reference distribution (training data)
+        current: Current distribution (new data)
+        buckets: Number of bins for numeric data
+
+    Returns:
+        PSI value (0 = no drift, >0.25 = significant drift)
+    """
+    ref_clean = pd.Series(reference).dropna()
+    curr_clean = pd.Series(current).dropna()
+
+    # Explicit check for empty distributions - prevent division by zero and invalid PSI
+    if len(ref_clean) == 0 or len(curr_clean) == 0:
+        logger.warning(
+            "Cannot compute PSI: one or both distributions are empty. "
+            f"Reference size: {len(ref_clean)}, Current size: {len(curr_clean)}. "
+            "Returning PSI = 0.0"
+        )
+        return 0.0
+
+    # For numeric data, bin the values
+    try:
+        # Combine both distributions to create consistent bins
+        all_values = pd.concat([ref_clean, curr_clean], ignore_index=True)
+        _, bin_edges = np.histogram(all_values, bins=buckets)
+
+        # Create categorical series based on bins
+        ref_binned = pd.cut(ref_clean, bins=bin_edges, include_lowest=True).astype(str)
+        curr_binned = pd.cut(curr_clean, bins=bin_edges, include_lowest=True).astype(str)
+
+        # Use existing PSI calculation for categorical data
+        return psi_categorical(ref_binned, curr_binned)
+
+    except Exception as e:
+        logger.warning(f"PSI computation failed: {e}. Returning PSI = 0.0")
+        return 0.0
+
+
 def psi_categorical(reference: pd.Series, current: pd.Series) -> float:
     """Calculate Population Stability Index for categorical features.
     

@@ -742,11 +742,11 @@ class AdaptiveDimensionalityReducer(BaseEstimator, TransformerMixin):
     - Appropriate parameters
     
     Decision Rules:
-    - High-dimensional + linear relationships → PCA
-    - Supervised task + class labels → LDA
-    - Non-linear manifold structure → UMAP
-    - Large dataset + need for speed → PCA or UMAP
-    - Small dataset + visualization → t-SNE
+    - High-dimensional + linear relationships -> PCA
+    - Supervised task + class labels -> LDA
+    - Non-linear manifold structure -> UMAP
+    - Large dataset + need for speed -> PCA or UMAP
+    - Small dataset + visualization -> t-SNE
     
     Example:
         >>> reducer = AdaptiveDimensionalityReducer(
@@ -881,12 +881,12 @@ class AdaptiveDimensionalityReducer(BaseEstimator, TransformerMixin):
                 logger.info("Auto-selected LDA (supervised with labels)")
                 return 'lda'
         
-        # Rule 2: High-dimensional linear data → PCA
+        # Rule 2: High-dimensional linear data -> PCA
         if n_features > 50:
             logger.info("Auto-selected PCA (high-dimensional data)")
             return 'pca'
         
-        # Rule 3: Small dataset + moderate features → UMAP (if available)
+        # Rule 3: Small dataset + moderate features -> UMAP (if available)
         if n_samples < 5000 and n_features > 10:
             if HAS_UMAP:
                 logger.info("Auto-selected UMAP (moderate size, non-linear)")

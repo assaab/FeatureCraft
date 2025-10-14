@@ -164,7 +164,7 @@ class AIFeatureAdvisor:
                         logger.warning("OpenAI API key not found. AI recommendations disabled.")
                         return None
                     self.client = openai.OpenAI(api_key=key)
-                    logger.info(f"✓ AI Advisor initialized with OpenAI ({self.model})")
+                    logger.info(f"[OK] AI Advisor initialized with OpenAI ({self.model})")
                     return self.client
                 except ImportError:
                     logger.warning("openai package not installed. Run: pip install openai")
@@ -178,7 +178,7 @@ class AIFeatureAdvisor:
                         logger.warning("Anthropic API key not found. AI recommendations disabled.")
                         return None
                     self.client = anthropic.Anthropic(api_key=key)
-                    logger.info(f"✓ AI Advisor initialized with Anthropic ({self.model})")
+                    logger.info(f"[OK] AI Advisor initialized with Anthropic ({self.model})")
                     return self.client
                 except ImportError:
                     logger.warning("anthropic package not installed. Run: pip install anthropic")
@@ -186,7 +186,7 @@ class AIFeatureAdvisor:
             
             elif self.provider == "local":
                 # Support for local LLMs (Ollama, LM Studio, etc.)
-                logger.info("✓ AI Advisor initialized with local model")
+                logger.info("[OK] AI Advisor initialized with local model")
                 return "local"
             
             else:
@@ -620,7 +620,7 @@ class AIFeatureAdvisor:
         # Risk assessment
         if estimated_features > n_rows * 0.5:
             strategy.risk_level = "high"
-            reasoning_parts.append("⚠️ High risk of overfitting - features approaching sample size")
+            reasoning_parts.append("[!] High risk of overfitting - features approaching sample size")
         elif estimated_features > n_rows * 0.2:
             strategy.risk_level = "medium"
         else:
@@ -680,135 +680,135 @@ class AIFeatureAdvisor:
         return """
 FeatureCraft Capabilities & Configuration Parameters:
 
-═══════════════════════════════════════════════════════════════
-📊 INTERACTIONS (Feature Combination Engineering)
-═══════════════════════════════════════════════════════════════
+===================================================================
+[INTERACTIONS] Feature Combination Engineering
+===================================================================
 
 Arithmetic Interactions:
-  • interactions_enabled: bool - Master switch for all interactions
-  • interactions_use_arithmetic: bool - Enable arithmetic operations
-  • interactions_arithmetic_ops: List[str] - Specific ops: ["add", "subtract", "multiply", "divide"]
-  • interactions_max_arithmetic_pairs: int - Max pairs (1-1000, typical: 15-100)
+  * interactions_enabled: bool - Master switch for all interactions
+  * interactions_use_arithmetic: bool - Enable arithmetic operations
+  * interactions_arithmetic_ops: List[str] - Specific ops: ["add", "subtract", "multiply", "divide"]
+  * interactions_max_arithmetic_pairs: int - Max pairs (1-1000, typical: 15-100)
 
 Polynomial Features:
-  • interactions_use_polynomial: bool - Enable polynomial expansion (x², x³, x₁.x₂)
-  • interactions_polynomial_degree: int - Degree (2=quadratic, 3=cubic)
-  • interactions_polynomial_interaction_only: bool - Only x₁.x₂, not x²
-  • interactions_polynomial_max_features: int - Max input features (2-50, prevents explosion)
+  * interactions_use_polynomial: bool - Enable polynomial expansion (x^2, x^3, x1*x2)
+  * interactions_polynomial_degree: int - Degree (2=quadratic, 3=cubic)
+  * interactions_polynomial_interaction_only: bool - Only x1*x2, not x^2
+  * interactions_polynomial_max_features: int - Max input features (2-50, prevents explosion)
 
 Ratio & Proportion Features:
-  • interactions_use_ratios: bool - Enable A/B ratios
-  • interactions_ratios_include_proportions: bool - Add A/(A+B) style
-  • interactions_ratios_include_log: bool - Add log(A/B) ratios
-  • interactions_max_ratio_pairs: int - Max pairs (1-500, typical: 15-50)
+  * interactions_use_ratios: bool - Enable A/B ratios
+  * interactions_ratios_include_proportions: bool - Add A/(A+B) style
+  * interactions_ratios_include_log: bool - Add log(A/B) ratios
+  * interactions_max_ratio_pairs: int - Max pairs (1-500, typical: 15-50)
 
 Multi-way Products:
-  • interactions_use_products: bool - Enable A.B.C multi-way products
-  • interactions_product_n_way: int - Number of features to multiply (2-5)
-  • interactions_max_products: int - Max products to create (1-100)
+  * interactions_use_products: bool - Enable A*B*C multi-way products
+  * interactions_product_n_way: int - Number of features to multiply (2-5)
+  * interactions_max_products: int - Max products to create (1-100)
 
 Categorical x Numeric Interactions:
-  • interactions_use_categorical_numeric: bool - Group statistics & deviations
-  • interactions_cat_num_strategy: str - "group_stats", "deviation", or "both"
-  • interactions_max_cat_num_pairs: int - Max pairs (1-200, typical: 10-30)
+  * interactions_use_categorical_numeric: bool - Group statistics & deviations
+  * interactions_cat_num_strategy: str - "group_stats", "deviation", or "both"
+  * interactions_max_cat_num_pairs: int - Max pairs (1-200, typical: 10-30)
 
 Domain-Specific:
-  • interactions_specific_pairs: List[Tuple[str, str]] - Explicit pairs: [("age", "income")]
-  • interactions_domain_formulas: Dict[str, str] - Custom formulas: {"bmi": "weight / (height ** 2)"}
+  * interactions_specific_pairs: List[Tuple[str, str]] - Explicit pairs: [("age", "income")]
+  * interactions_domain_formulas: Dict[str, str] - Custom formulas: {"bmi": "weight / (height ** 2)"}
 
-═══════════════════════════════════════════════════════════════
-🔤 ENCODING (Categorical Variable Transformation)
-═══════════════════════════════════════════════════════════════
+===================================================================
+[ENCODING] Categorical Variable Transformation
+===================================================================
 
 Target Encoding (Recommended for high cardinality):
-  • use_target_encoding: bool - Out-of-fold target encoding
-  • use_leave_one_out_te: bool - LOO instead of K-Fold
-  • te_smoothing: float - Smoothing parameter (0-100, typical: 10-30)
-  • te_noise: float - Regularization noise (0-1, typical: 0-0.05)
-  • te_prior: str - "global_mean" or "median"
+  * use_target_encoding: bool - Out-of-fold target encoding
+  * use_leave_one_out_te: bool - LOO instead of K-Fold
+  * te_smoothing: float - Smoothing parameter (0-100, typical: 10-30)
+  * te_noise: float - Regularization noise (0-1, typical: 0-0.05)
+  * te_prior: str - "global_mean" or "median"
 
 Other Encodings:
-  • use_frequency_encoding: bool - Category → frequency count
-  • use_count_encoding: bool - Category → occurrence count
-  • use_woe: bool - Weight of Evidence (binary classification only)
-  • use_ordinal: bool - Ordinal encoding for ordered categories
-  • ordinal_maps: Dict[str, List[str]] - Manual ordering: {"size": ["S", "M", "L", "XL"]}
+  * use_frequency_encoding: bool - Category to frequency count
+  * use_count_encoding: bool - Category to occurrence count
+  * use_woe: bool - Weight of Evidence (binary classification only)
+  * use_ordinal: bool - Ordinal encoding for ordered categories
+  * ordinal_maps: Dict[str, List[str]] - Manual ordering: {"size": ["S", "M", "L", "XL"]}
 
 Hashing (for very high cardinality):
-  • hashing_n_features_tabular: int - Hash features (8-8192, typical: 128-512)
+  * hashing_n_features_tabular: int - Hash features (8-8192, typical: 128-512)
 
 Cardinality Thresholds:
-  • low_cardinality_max: int - Max for one-hot encoding (1-1000, typical: 5-15)
-  • mid_cardinality_max: int - Max for target encoding (1-10000, typical: 30-100)
-  • rare_level_threshold: float - Group rare categories (0-1, typical: 0.01-0.05)
+  * low_cardinality_max: int - Max for one-hot encoding (1-1000, typical: 5-15)
+  * mid_cardinality_max: int - Max for target encoding (1-10000, typical: 30-100)
+  * rare_level_threshold: float - Group rare categories (0-1, typical: 0.01-0.05)
 
 ═══════════════════════════════════════════════════════════════
-🔠 TEXT PROCESSING (NLP Feature Extraction)
+TEXT PROCESSING (NLP Feature Extraction)
 ═══════════════════════════════════════════════════════════════
 
 Vectorization:
-  • tfidf_max_features: int - Max TF-IDF features (100-1M, typical: 1000-20000)
-  • ngram_range: Tuple[int, int] - N-gram range (typical: (1,1), (1,2), or (1,3))
-  • text_use_hashing: bool - HashingVectorizer instead of TF-IDF
-  • text_hashing_features: int - Hash features (1024-131072, typical: 4096-16384)
-  • svd_components_for_trees: int - SVD reduction for trees (2-1000, typical: 50-200)
+  * tfidf_max_features: int - Max TF-IDF features (100-1M, typical: 1000-20000)
+  * ngram_range: Tuple[int, int] - N-gram range (typical: (1,1), (1,2), or (1,3))
+  * text_use_hashing: bool - HashingVectorizer instead of TF-IDF
+  * text_hashing_features: int - Hash features (1024-131072, typical: 4096-16384)
+  * svd_components_for_trees: int - SVD reduction for trees (2-1000, typical: 50-200)
 
 Basic Text Statistics (lightweight):
-  • text_extract_statistics: bool - char_count, word_count, avg_word_length, etc.
-  • text_extract_linguistic: bool - stopword_count, punctuation_count, uppercase_ratio
+  * text_extract_statistics: bool - char_count, word_count, avg_word_length, etc.
+  * text_extract_linguistic: bool - stopword_count, punctuation_count, uppercase_ratio
 
 Sentiment Analysis (moderate cost):
-  • text_extract_sentiment: bool - Polarity & subjectivity (TextBlob/VADER)
-  • text_sentiment_method: str - "textblob" or "vader"
+  * text_extract_sentiment: bool - Polarity & subjectivity (TextBlob/VADER)
+  * text_sentiment_method: str - "textblob" or "vader"
 
 Word Embeddings (expensive):
-  • text_use_word_embeddings: bool - Word2Vec, GloVe, FastText
-  • text_embedding_method: str - "word2vec", "glove", "fasttext"
-  • text_embedding_dims: int - Dimensions (50-300)
-  • text_embedding_aggregation: str - "mean", "max", "sum"
+  * text_use_word_embeddings: bool - Word2Vec, GloVe, FastText
+  * text_embedding_method: str - "word2vec", "glove", "fasttext"
+  * text_embedding_dims: int - Dimensions (50-300)
+  * text_embedding_aggregation: str - "mean", "max", "sum"
 
 Sentence Embeddings (very expensive, transformers):
-  • text_use_sentence_embeddings: bool - BERT, SentenceTransformers
-  • text_sentence_model: str - Model name (e.g., "all-MiniLM-L6-v2")
-  • text_sentence_batch_size: int - Batch size (1-256, typical: 16-64)
+  * text_use_sentence_embeddings: bool - BERT, SentenceTransformers
+  * text_sentence_model: str - Model name (e.g., "all-MiniLM-L6-v2")
+  * text_sentence_batch_size: int - Batch size (1-256, typical: 16-64)
 
 Named Entity Recognition (expensive, requires spaCy):
-  • text_extract_ner: bool - Extract entity counts (PERSON, ORG, GPE, etc.)
-  • text_ner_model: str - "en_core_web_sm", "en_core_web_md", "en_core_web_lg"
-  • text_ner_entity_types: List[str] - Entities to count
+  * text_extract_ner: bool - Extract entity counts (PERSON, ORG, GPE, etc.)
+  * text_ner_model: str - "en_core_web_sm", "en_core_web_md", "en_core_web_lg"
+  * text_ner_entity_types: List[str] - Entities to count
 
 Topic Modeling (expensive):
-  • text_use_topic_modeling: bool - LDA topic distributions
-  • text_topic_n_topics: int - Number of topics (2-100, typical: 5-20)
-  • text_topic_max_features: int - Vectorizer features (100-50000)
+  * text_use_topic_modeling: bool - LDA topic distributions
+  * text_topic_n_topics: int - Number of topics (2-100, typical: 5-20)
+  * text_topic_max_features: int - Vectorizer features (100-50000)
 
 Readability Scores:
-  • text_extract_readability: bool - Flesch-Kincaid, SMOG index, etc.
-  • text_readability_metrics: List[str] - Metrics to compute
+  * text_extract_readability: bool - Flesch-Kincaid, SMOG index, etc.
+  * text_readability_metrics: List[str] - Metrics to compute
 
 ═══════════════════════════════════════════════════════════════
-⚖️ SCALING & TRANSFORMS (Numeric Feature Normalization)
+SCALING & TRANSFORMS (Numeric Feature Normalization)
 ═══════════════════════════════════════════════════════════════
 
 Estimator-Specific Scaling (CRITICAL for optimization):
-  • scaler_linear: str - "standard", "minmax", "robust", "maxabs", "none"
-  • scaler_svm: str - Same options (typically "standard")
-  • scaler_tree: str - Same options (typically "none" - trees don't need scaling!)
-  • scaler_knn: str - Same options (typically "minmax" or "standard")
-  • scaler_nn: str - Same options (typically "minmax" or "standard")
+  * scaler_linear: str - "standard", "minmax", "robust", "maxabs", "none"
+  * scaler_svm: str - Same options (typically "standard")
+  * scaler_tree: str - Same options (typically "none" - trees don't need scaling!)
+  * scaler_knn: str - Same options (typically "minmax" or "standard")
+  * scaler_nn: str - Same options (typically "minmax" or "standard")
 
 Auto-Scaling:
-  • scaler_robust_if_outliers: bool - Auto-use RobustScaler if outliers detected
+  * scaler_robust_if_outliers: bool - Auto-use RobustScaler if outliers detected
 
 Mathematical Transforms (NEW - Comprehensive):
-  • transform_strategy: str - "auto", "log", "log1p", "sqrt", "box_cox", "yeo_johnson", "reciprocal", "exponential", "none"
-  • transform_columns: List[str] | None - Specific columns to transform (None = auto-detect)
-  • log_shift: float - Shift for log(x + shift) to handle zeros (typical: 1e-5)
-  • sqrt_handle_negatives: str - "abs" (signed sqrt), "clip" (set to 0), "error"
-  • reciprocal_epsilon: float - Prevent div by zero: 1/(x + eps) (typical: 1e-10)
-  • exponential_transform_type: str - "square" (x²), "cube" (x³), "exp" (e^x)
-  • boxcox_lambda: float | None - Fixed lambda for Box-Cox (None = optimize)
-  • skew_threshold: float - Skewness threshold for auto transform selection (0+, typical: 0.5-2.0)
+  * transform_strategy: str - "auto", "log", "log1p", "sqrt", "box_cox", "yeo_johnson", "reciprocal", "exponential", "none"
+  * transform_columns: List[str] | None - Specific columns to transform (None = auto-detect)
+  * log_shift: float - Shift for log(x + shift) to handle zeros (typical: 1e-5)
+  * sqrt_handle_negatives: str - "abs" (signed sqrt), "clip" (set to 0), "error"
+  * reciprocal_epsilon: float - Prevent div by zero: 1/(x + eps) (typical: 1e-10)
+  * exponential_transform_type: str - "square" (x^2), "cube" (x^3), "exp" (e^x)
+  * boxcox_lambda: float | None - Fixed lambda for Box-Cox (None = optimize)
+  * skew_threshold: float - Skewness threshold for auto transform selection (0+, typical: 0.5-2.0)
   
 Transform Selection Guide:
   - "auto": Intelligently selects per column based on data (RECOMMENDED)
@@ -821,28 +821,28 @@ Transform Selection Guide:
   - "exponential": Left-skewed data (rare, use with caution)
 
 Outlier Handling:
-  • outlier_share_threshold: float - Trigger robust methods (0-1, typical: 0.03-0.10)
-  • winsorize: bool - Clip extreme outliers
-  • clip_percentiles: Tuple[float, float] - Clip range (typical: (0.01, 0.99))
+  * outlier_share_threshold: float - Trigger robust methods (0-1, typical: 0.03-0.10)
+  * winsorize: bool - Clip extreme outliers
+  * clip_percentiles: Tuple[float, float] - Clip range (typical: (0.01, 0.99))
 
-═══════════════════════════════════════════════════════════════
-📊 BINNING / DISCRETIZATION (NEW - Convert Continuous → Categorical)
-═══════════════════════════════════════════════════════════════
+===================================================================
+[BINNING] BINNING / DISCRETIZATION (NEW - Convert Continuous to Categorical)
+===================================================================
 
 Master Controls:
-  • binning_enabled: bool - Enable binning/discretization
-  • binning_columns: List[str] | None - Specific columns (None = auto-detect numeric)
-  • binning_n_bins: int - Number of bins (2-20, typical: 3-7)
-  • binning_encode: str - "ordinal" (0,1,2...) or "onehot"
+  * binning_enabled: bool - Enable binning/discretization
+  * binning_columns: List[str] | None - Specific columns (None = auto-detect numeric)
+  * binning_n_bins: int - Number of bins (2-20, typical: 3-7)
+  * binning_encode: str - "ordinal" (0,1,2...) or "onehot"
 
 Binning Strategies:
-  • binning_strategy: str - "auto", "equal_width", "equal_frequency", "kmeans", "decision_tree", "custom"
+  * binning_strategy: str - "auto", "equal_width", "equal_frequency", "kmeans", "decision_tree", "custom"
 
 Strategy Guide:
   - "auto": Intelligently selects best strategy per column (RECOMMENDED)
-    → Uses decision_tree if target correlation strong
-    → Uses equal_frequency for skewed distributions
-    → Uses equal_width for uniform distributions
+    -> Uses decision_tree if target correlation strong
+    -> Uses equal_frequency for skewed distributions
+    -> Uses equal_width for uniform distributions
   - "equal_width": Fixed-width intervals (good for uniform data)
   - "equal_frequency": Quantile-based bins (good for skewed data, equal sample counts)
   - "kmeans": Cluster-based boundaries (data-driven, complex distributions)
@@ -850,13 +850,13 @@ Strategy Guide:
   - "custom": User-defined bin edges via binning_custom_bins
 
 Auto Strategy Parameters:
-  • binning_prefer_supervised: bool - Use decision_tree when correlation strong (default: True)
-  • binning_skewness_threshold: float - Skewness threshold for equal_frequency vs equal_width (typical: 1.0)
+  * binning_prefer_supervised: bool - Use decision_tree when correlation strong (default: True)
+  * binning_skewness_threshold: float - Skewness threshold for equal_frequency vs equal_width (typical: 1.0)
 
 Advanced Options:
-  • binning_custom_bins: Dict[str, List[float]] - Custom edges per column: {"age": [0, 18, 35, 65, 100]}
-  • binning_handle_unknown: str - "ignore" or "error" for out-of-range values
-  • binning_subsample: int - Subsample for expensive methods (kmeans, decision_tree, typical: 200000)
+  * binning_custom_bins: Dict[str, List[float]] - Custom edges per column: {"age": [0, 18, 35, 65, 100]}
+  * binning_handle_unknown: str - "ignore" or "error" for out-of-range values
+  * binning_subsample: int - Subsample for expensive methods (kmeans, decision_tree, typical: 200000)
 
 Why Use Binning:
   - Linear models can learn threshold effects (e.g., "age > 65 → high risk")
@@ -877,7 +877,7 @@ Cost:
   - decision_tree: Moderate-High O(n log n * n_bins)
 
 ═══════════════════════════════════════════════════════════════
-🎯 FEATURE SELECTION (Dimensionality Reduction)
+ FEATURE SELECTION (Dimensionality Reduction)
 ═══════════════════════════════════════════════════════════════
 
 Correlation-Based:
@@ -895,7 +895,7 @@ Weight of Evidence (binary classification):
   • woe_iv_threshold: float - Min Information Value (0+, typical: 0.02-0.10)
 
 ═══════════════════════════════════════════════════════════════
-📅 DATETIME FEATURES (Temporal Feature Engineering)
+DATETIME FEATURES (Temporal Feature Engineering)
 ═══════════════════════════════════════════════════════════════
 
 Basic Extraction:
@@ -912,7 +912,7 @@ Time Series:
   • fourier_orders: List[int] - Orders (e.g., [3, 7] for daily/weekly)
 
 ═══════════════════════════════════════════════════════════════
-⚖️ CLASS IMBALANCE HANDLING
+CLASS IMBALANCE HANDLING
 ═══════════════════════════════════════════════════════════════
 
 SMOTE (oversampling):
@@ -925,7 +925,7 @@ Undersampling:
   • use_undersample: bool - Random undersampling of majority class
 
 ═══════════════════════════════════════════════════════════════
-🎲 MISSING VALUES & IMPUTATION
+ MISSING VALUES & IMPUTATION
 ═══════════════════════════════════════════════════════════════
 
 Numeric:
@@ -938,7 +938,7 @@ Categorical:
   • add_missing_indicators: bool - Binary flags for missingness
 
 ═══════════════════════════════════════════════════════════════
-⚙️ CROSS-VALIDATION (for Target Encoding)
+ CROSS-VALIDATION (for Target Encoding)
 ═══════════════════════════════════════════════════════════════
 
   • cv_n_splits: int - Number of folds (2-20, typical: 3-10)
@@ -946,7 +946,7 @@ Categorical:
   • cv_shuffle: bool - Shuffle data in KFold
 
 ═══════════════════════════════════════════════════════════════
-🏭 CLUSTERING-BASED FEATURES (NEW - Unsupervised Pattern Discovery)
+CLUSTERING-BASED FEATURES (NEW - Unsupervised Pattern Discovery)
 ═══════════════════════════════════════════════════════════════
 
 Master Controls:
@@ -1005,7 +1005,7 @@ Cost:
   - Hierarchical: High O(n²), typical: slow for >5K rows
 
 ═══════════════════════════════════════════════════════════════
-📊 STATISTICAL FEATURES (NEW - Cross-feature Patterns & Outliers)
+ STATISTICAL FEATURES (NEW - Cross-feature Patterns & Outliers)
 ═══════════════════════════════════════════════════════════════
 
 Row Statistics (Cross-feature Aggregations):
@@ -1066,7 +1066,7 @@ Cost:
   - Outlier detection (IsolationForest/LOF): Moderate O(n log n) to O(n²)
 
 ═══════════════════════════════════════════════════════════════
-🔄 AGGREGATION & GROUPBY FEATURES (NEW - Hierarchical & Time-Series)
+AGGREGATION & GROUPBY FEATURES (NEW - Hierarchical & Time-Series)
 ═══════════════════════════════════════════════════════════════
 
 GroupBy Statistics (SQL-like GROUP BY aggregations):
@@ -1127,7 +1127,7 @@ Cost:
   - Rank: Moderate O(n log n) per group
 
 ═══════════════════════════════════════════════════════════════
-🌍 DOMAIN-SPECIFIC FEATURES (NEW - Industry Knowledge Encoding)
+DOMAIN-SPECIFIC FEATURES (NEW - Industry Knowledge Encoding)
 ═══════════════════════════════════════════════════════════════
 
 Master Controls:
@@ -1223,7 +1223,7 @@ Analyze this dataset and recommend SPECIFIC FeatureCraft configuration parameter
 {capabilities}
 
 ═══════════════════════════════════════════════════════════════
-📊 DATASET PROFILE
+DATASET PROFILE
 ═══════════════════════════════════════════════════════════════
 
 Basic Info:
@@ -1255,7 +1255,7 @@ Data Quality Issues:
 """
         
         prompt += """═══════════════════════════════════════════════════════════════
-🎯 YOUR TASK
+YOUR TASK
 ═══════════════════════════════════════════════════════════════
 
 Recommend SPECIFIC FeatureCraft configuration parameters in JSON format:
@@ -1439,7 +1439,7 @@ Recommend SPECIFIC FeatureCraft configuration parameters in JSON format:
 }
 
 ═══════════════════════════════════════════════════════════════
-📋 CRITICAL GUIDELINES
+ CRITICAL GUIDELINES
 ═══════════════════════════════════════════════════════════════
 
 1. **Recommend ONLY FeatureCraft parameters that exist** (see capabilities above)
@@ -1690,12 +1690,12 @@ Respond with ONLY valid JSON, no markdown formatting or explanations outside the
         """Print strategy in a beautiful format."""
         content = f"""[bold cyan]AI Feature Engineering Strategy[/bold cyan]
 
-[yellow]📊 Estimated Output:[/yellow]
+[yellow] Estimated Output:[/yellow]
   • Features: {strategy.estimated_feature_count}
   • Training Time: {strategy.estimated_training_time}
   • Risk Level: [{self._risk_color(strategy.risk_level)}]{strategy.risk_level.upper()}[/{self._risk_color(strategy.risk_level)}]
 
-[yellow]🔧 Core Techniques:[/yellow]
+[yellow] Core Techniques:[/yellow]
   • Interactions: {'✓ Enabled' if strategy.use_interactions else '✗ Disabled'}
 """
         if strategy.use_interactions:

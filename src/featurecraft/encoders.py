@@ -974,14 +974,14 @@ class FrequencyEncoder(BaseEstimator, TransformerMixin):
         unseen_value: Value for unseen categories at transform time
         
     Attributes:
-        freq_maps_: Dict mapping column → category → frequency
+        freq_maps_: Dict mapping column to category to frequency
         columns_: List of encoded columns
         
     Example:
         >>> encoder = FrequencyEncoder()
         >>> encoder.fit(X_train)
         >>> X_train_encoded = encoder.transform(X_train)
-        >>> X_test_encoded = encoder.transform(X_test)  # Unseen categories → unseen_value
+        >>> X_test_encoded = encoder.transform(X_test)  # Unseen categories to unseen_value
     """
     
     def __init__(
@@ -1059,7 +1059,7 @@ class CountEncoder(BaseEstimator, TransformerMixin):
         normalize: If True, normalize counts by total count (equivalent to FrequencyEncoder)
         
     Attributes:
-        count_maps_: Dict mapping column → category → count
+        count_maps_: Dict mapping column to category to count
         columns_: List of encoded columns
         
     Example:
@@ -1455,8 +1455,8 @@ class BinaryEncoder(BaseEstimator, TransformerMixin):
         unknown_value: Integer ID for unknown categories (default: -1)
         
     Attributes:
-        category_maps_: Dict mapping column → category → integer ID
-        n_bits_: Dict mapping column → number of binary bits needed
+        category_maps_: Dict mapping column to category to integer ID
+        n_bits_: Dict mapping column to number of binary bits needed
         columns_: List of encoded columns
         
     Example:
@@ -1585,7 +1585,7 @@ class EntityEmbeddingsEncoder(BaseEstimator, TransformerMixin, LeakageGuardMixin
     by the "Entity Embeddings of Categorical Variables" paper (Guo & Berkhahn, 2016).
     
     The encoder creates a neural network with:
-    1. Embedding layers for each categorical column (maps category → dense vector)
+    1. Embedding layers for each categorical column (maps category to dense vector)
     2. Concatenation of all embeddings
     3. Dense layers trained to predict the target
     4. Embeddings are extracted and used as features
@@ -1618,9 +1618,9 @@ class EntityEmbeddingsEncoder(BaseEstimator, TransformerMixin, LeakageGuardMixin
         backend: Deep learning backend - 'keras' (TensorFlow/Keras) or 'pytorch'
         
     Attributes:
-        embeddings_: Dict mapping column → embedding matrix (n_categories, embedding_dim)
-        category_maps_: Dict mapping column → category → integer ID
-        embedding_dims_: Dict mapping column → embedding dimension
+        embeddings_: Dict mapping column to embedding matrix (n_categories, embedding_dim)
+        category_maps_: Dict mapping column to category to integer ID
+        embedding_dims_: Dict mapping column to embedding dimension
         model_: Trained neural network model
         columns_: List of encoded columns
         
@@ -1985,7 +1985,7 @@ class EntityEmbeddingsEncoder(BaseEstimator, TransformerMixin, LeakageGuardMixin
         """Get learned embedding matrices for each column.
         
         Returns:
-            Dict mapping column → embedding matrix (n_categories, embedding_dim)
+            Dict mapping column to embedding matrix (n_categories, embedding_dim)
         """
         if not self.embeddings_:
             raise RuntimeError("EntityEmbeddingsEncoder not fitted. Call fit() first.")
